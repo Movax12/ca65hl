@@ -934,24 +934,24 @@ DEBUG_H_ON = 0
     .endif
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
     
-    .local ifEndIfCodeBlockStart_IfGotoFail ;  branch to this label on failed condition with a goto statement. 
-                                            ;  branch to this label on a 'true' condition with a code block defined by if..endif
+    .local ifEndIfCodeBlockStart_IfGotoFail ;  branch to this label on failed condition with a goto statement, or pass condition with a code block defined by if..endif
+    .local longJumpToEndIf_IfGotoPass       ;  for long jump: branch to this label on failed condition with an if..endif statement, or pass condition with goto
     .local negateNext                       ;  flag: if single branch term to be negated              
     .local negateBracketSet                 ;  flag: if a set of terms in brackets to be negated
     .local bracketLevel                     ;  level of brackets we are in, lowest is 1
-    .local branchLabelCounter               ;  count of how many branch labels to OR/AND conditions needed
+    .local branchLabelCounter               ;  count of how many branch labels to additional OR/AND conditions needed
     .local foundTokenPosition               ;  save token position of found && or || tokens when performing look-ahead evaluating correct branch
-    .local lastCloseBracketPos              ;  save position of end of test condition ( could be goto statement after)
+    .local lastCloseBracketPos              ;  save position of end of test condition ( could be goto/break statement after)
     .local gotoUserLabel                    ;  flag: if 'goto' found, branch to label passed in <condition>
     .local gotoBreakLabel                   ;  flag: branch to break label to exit loop
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
-    .local foundValidAND                    ;  flag: found an && when considering if bracket set is inverted
-    .local foundValidOR                     ;  flag: found an || when considering if bracket set is inverted
-    .local exitedBracketSet                 ;  when evaluating look-ahead, did we exit a bracket set? (doesn't include bracket sets inside current)
+    .local foundValidAND                    ;  flag: found an && when scanning ahead while considering if bracket set is inverted
+    .local foundValidOR                     ;  flag: found an || when scanning ahead while considering if bracket set is inverted
+    .local exitedBracketSet                 ;  when evaluating look-ahead, did we exit to a lower bracket set?
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
-    .local foundOR_AND
-    .local statementStartPos                ; token pos. for start of found statement
-    .local statementTokenCount              ; token count for found statement
+    .local foundOR_AND                      ;  flag: matched a AND or OR when scanning ahead
+    .local statementStartPos                ;  token position for start of found statement
+    .local statementTokenCount              ;  token count for found statement
     
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     
@@ -1065,8 +1065,8 @@ DEBUG_H_ON = 0
             ; see if we need a label here:
             .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined)
                 .if tokenPositionForBranchLabel{i} = currentTokenNumber
-                    .ifndef .ident( .sprintf( "_IF_LABEL_%04X_BRANCH_%02X_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} ))
-                        .ident( .sprintf( "_IF_LABEL_%04X_BRANCH_%02X_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} )):
+                    .ifndef .ident( .sprintf( "IF_LABEL_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} ))
+                        .ident( .sprintf( "IF_LABEL_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} )):
                     .endif
                 .endif
             .endrepeat
@@ -1145,7 +1145,7 @@ DEBUG_H_ON = 0
                     .else
                         xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
-                            ; did we exit our brackets? if yes then any possible OR must be in a lower set of brackets
+                            ; did we exit the brackets? if yes then any valid OR for branch must be in a lower set of brackets
                             .if exitedBracketSet
                                 .if scanAheadBracketLevel < bracketLevel
                                     foundTokenPosition .set currentTokenNumber
@@ -1189,12 +1189,12 @@ DEBUG_H_ON = 0
                         .else
                             xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
-                                ; did we exit our brackets? if yes then any possible AND must be in a lower set of brackets
+                                ; did we exit our brackets? if yes then any valid AND must be in a lower set of brackets
                                 .if exitedBracketSet
                                     .if scanAheadBracketLevel < bracketLevel
                                         foundTokenPosition .set currentTokenNumber
                                     .endif
-                                ; uncomment for left to right precedence, commented allows ANDs to have precedence     
+                                ; uncomment for left to right precedence. As commented allows ANDs to have precedence     
                                 ;.elseif scanAheadBracketLevel = bracketLevel
                                 ;    foundTokenPosition .set currentTokenNumber
                                 .endif
@@ -1210,19 +1210,19 @@ DEBUG_H_ON = 0
             
             .if foundValidAND || foundValidOR
                 .if foundTokenPosition
-                    ; branch to appropriate AND/OR statement:
-                    .define branchToLabel .ident( .sprintf( "_IF_LABEL_%04X_BRANCH_%02X_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition ))
+                    ; branch to next appropriate AND/OR statement:
+                    .define branchToLabel .ident( .sprintf( "IF_LABEL_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition ))
                     tokenPositionForBranchLabel{branchLabelCounter} .set foundTokenPosition
                     branchLabelCounter .set branchLabelCounter + 1
-                .else
+                .else ; additional || or && that affects this branch, but none to branch to:
                     .if foundValidAND
-                        .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag
+                        .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag, e.g.: if ( C set && N set)
                     .else ; foundValidOR
-                        .define branchToLabel conditionPassLabel
+                        .define branchToLabel conditionPassLabel    ; branch to conditionPassLabel on flag, e.g.: if ( C set || N set)
                     .endif
                 .endif
-            .else ; no || or && to branch to:
-                ; branch directly to pass condition on goto, invert and branch to ENDIF
+            .else ; no || or && found that applies to this branch:
+                ; branch directly to pass condition on goto/break, invert and branch to ENDIF
                 ; for If..ENDIF statements. Flip this when long jumps are active.
                 .if (gotoUserLabel || gotoBreakLabel) ^ FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
                     .define branchToLabel conditionPassLabel
@@ -1246,32 +1246,29 @@ DEBUG_H_ON = 0
     
     ; when long jump active, if..endif will branch here on fail, goto/break will branch here on pass:
     .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-        .local longJumpToEndIf_IfGotoPass
         longJumpToEndIf_IfGotoPass:
-        
         .if gotoUserLabel || gotoBreakLabel
             .if gotoUserLabel
                 .define jmpToLabel .mid(lastCloseBracketPos + 2, .tcount({condition}) - lastCloseBracketPos - 2, {condition})
-            .else
+            .else ;break:
                 .define jmpToLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
             .endif
-        .else
+        .else ; endif:
             .define jmpToLabel .ident( .sprintf( "_IF_STATEMENT_ENDIF_LABEL_%04X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
         .endif
         jmp jmpToLabel
-        .assert jmpToLabel - * >= 128, warning, "Branch could be reached without long jump."
         .undefine jmpToLabel
     .endif
     ; local label for branching into the code block, or failing for goto statement:
     ifEndIfCodeBlockStart_IfGotoFail:   
     
-    .if .not gotoUserLabel
-        stackPush "_IF_ENDIF_STATEMENT_STACK_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
-    .endif
     .if gotoBreakLabel
         stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
+    .elseif .not gotoUserLabel
+        stackPush "_IF_ENDIF_STATEMENT_STACK_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
     .endif
-    FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT + 1    ; increase if statement count
+    
+    FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT + 1    ; increase if statement count always
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 0
 
     endTokenListEval ; clear token evaluation    
@@ -1472,7 +1469,7 @@ DEBUG_H_ON = 0
 .macro ___generateBreakLabel checkMoreBreakStatements
     .local _BREAK_STATEMENT_COUNT
     stackPeek "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT  
-    .ifnblank checkMoreBreakStatements
+    .ifnblank checkMoreBreakStatements  ; recursive call to pop stack of any matching break statements
         .if _BREAK_STATEMENT_COUNT = checkMoreBreakStatements
             stackPop "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT
             ___generateBreakLabel _BREAK_STATEMENT_COUNT
