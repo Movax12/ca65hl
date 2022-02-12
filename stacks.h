@@ -10,6 +10,8 @@
 ; push and pop macros.. save a value on a user named stack.
 ; stackname - string
 ; value - value to be stored
+.ifndef _STACKS_
+_STACKS = 1
 
 
 .scope stacksValues
@@ -129,3 +131,5 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+
+.endif
