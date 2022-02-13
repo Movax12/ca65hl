@@ -947,7 +947,7 @@ DEBUG_H_ON = 0
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
     .local foundValidAND                    ;  flag: found an && when scanning ahead while considering if bracket set is inverted
     .local foundValidOR                     ;  flag: found an || when scanning ahead while considering if bracket set is inverted
-    .local exitedBracketSet                 ;  when evaluating look-ahead, did we exit to a lower bracket set?
+    .local exitedBracketSetLevel                 ;  when evaluating look-ahead, did we exit to a lower bracket set?
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
     .local foundOR_AND                      ;  flag: matched a AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
@@ -966,7 +966,7 @@ DEBUG_H_ON = 0
     foundValidAND           .set 0
     foundValidOR            .set 0
     negateStackCounter      .set 0
-    exitedBracketSet        .set 0
+    exitedBracketSetLevel        .set 0
     scanAheadNegateBrackets .set 0
     
     ; array for label locations:
@@ -1094,9 +1094,9 @@ DEBUG_H_ON = 0
             statementTokenCount .set currentTokenNumber - statementStartPos
             
             previousToken
-            verifyNextToken { ) || && } ; verify next token
+            verifyNextToken { ) || && }
             nextToken
-            ; evaluate the statement and determine the branch
+            ; evaluate the statement and determine the condition
             evaluateStatement {.mid(statementStartPos, statementTokenCount, {condition})}
     
             .if negateNext
@@ -1115,8 +1115,16 @@ DEBUG_H_ON = 0
             foundTokenPosition .set 0
             scanAheadBracketLevel .set bracketLevel
             scanAheadNegateBrackets .set negateBracketSet
-            exitedBracketSet .set 0
+            exitedBracketSetLevel .set 0
             foundOR_AND      .set 0
+            ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' || V set)
+            .repeat .tcount({condition}) - currentTokenNumber
+            .if (!EOT) && xmatchToken {)}
+                scanAheadBracketLevel .set scanAheadBracketLevel - 1
+                exitedBracketSetLevel .set scanAheadBracketLevel
+                nextToken
+            .endif
+            .endrepeat
             ; --------------------------------------------------------------------------------------------
             ; where to branch to depends on next token
             xmatchSpecial {&&}, foundValidAND, scanAheadNegateBrackets ; special token match, considers negated bracket set
@@ -1139,15 +1147,17 @@ DEBUG_H_ON = 0
                     .elseif xmatchToken {)}
                         scanAheadBracketLevel .set scanAheadBracketLevel - 1
                         .if scanAheadBracketLevel < bracketLevel
-                            exitedBracketSet .set 1
+                            .if !exitedBracketSetLevel
+                                exitedBracketSetLevel .set scanAheadBracketLevel
+                            .endif
                         .endif
                         stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                     .else
                         xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
                             ; did we exit the brackets? if yes then any valid OR for branch must be in a lower set of brackets
-                            .if exitedBracketSet
-                                .if scanAheadBracketLevel < bracketLevel
+                            .if exitedBracketSetLevel
+                                .if scanAheadBracketLevel <= exitedBracketSetLevel
                                     foundTokenPosition .set currentTokenNumber
                                 .endif
                             .elseif scanAheadBracketLevel = bracketLevel
@@ -1183,15 +1193,17 @@ DEBUG_H_ON = 0
                         .elseif xmatchToken {)}
                             scanAheadBracketLevel .set scanAheadBracketLevel - 1
                             .if scanAheadBracketLevel < bracketLevel
-                                exitedBracketSet .set 1
+                                .if !exitedBracketSetLevel
+                                    exitedBracketSetLevel .set scanAheadBracketLevel
+                                .endif
                             .endif
                             stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                         .else
                             xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
                                 ; did we exit our brackets? if yes then any valid AND must be in a lower set of brackets
-                                .if exitedBracketSet
-                                    .if scanAheadBracketLevel < bracketLevel
+                                .if exitedBracketSetLevel
+                                    .if scanAheadBracketLevel <= exitedBracketSetLevel
                                         foundTokenPosition .set currentTokenNumber
                                     .endif
                                 ; uncomment for left to right precedence. As commented allows ANDs to have precedence     
