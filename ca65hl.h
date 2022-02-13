@@ -947,7 +947,7 @@ DEBUG_H_ON = 0
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
     .local foundValidAND                    ;  flag: found an && when scanning ahead while considering if bracket set is inverted
     .local foundValidOR                     ;  flag: found an || when scanning ahead while considering if bracket set is inverted
-    .local exitedBracketSetLevel                 ;  when evaluating look-ahead, did we exit to a lower bracket set?
+    .local exitedBracketSetLevel            ;  when evaluating look-ahead, save the bracket level if exiting the conditions bracket level
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
     .local foundOR_AND                      ;  flag: matched a AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
@@ -966,7 +966,7 @@ DEBUG_H_ON = 0
     foundValidAND           .set 0
     foundValidOR            .set 0
     negateStackCounter      .set 0
-    exitedBracketSetLevel        .set 0
+    exitedBracketSetLevel   .set 0
     scanAheadNegateBrackets .set 0
     
     ; array for label locations:
