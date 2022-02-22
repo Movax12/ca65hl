@@ -20,16 +20,16 @@ DEBUG_H_ON = 0
 
 .define less                C clear
 .define greaterORequal      C set
-.define carry               C set
-.define zero                Z set
-.define equal               Z set
+.define carry               C 
+.define zero                Z
+.define equal               Z
 .define plus                N clear
 .define positive            N clear
-.define minus               N set
-.define negative            N set
-.define bit7                N set
-.define overflow            V set
-.define bit6                V set
+.define minus               N
+.define negative            N 
+.define bit7                N 
+.define overflow            V 
+.define bit6                V 
 .define bitset              Z clear
 
 .define greater             G set               ; Use greater and less/equal macros to simulate
@@ -164,6 +164,7 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 ; set the flag for long jumps
+; TODO.. warnings for unnecessary long branches 
 
 .macro setLongBranch l, v
     .if .xmatch(l, on) || .xmatch(l, +)
@@ -182,9 +183,11 @@ DEBUG_H_ON = 0
     .local open
     .local close
     .local reg
+    .local regPos
     open   .set 0
     close  .set 0
     reg    .set 0
+    regPos  .set 0
     printTokenList {Instruction: instr op}
     
     ___findToken {op}, [, open
@@ -211,20 +214,22 @@ DEBUG_H_ON = 0
                     .error "Expected: '+' or '-'"
                 .endif
             .else
-                ; no reg found, check right side to allow '+ x]' type pattern
-                .if .xmatch( {.mid(close - 1, 1 ,{op})}, x)
+                ; No reg found yet. Check for '+x' anywhere in the brackets
+                ___findToken {op}, x, regPos
+                .if regPos && regPos < close
                     reg .set ___math::REGX
-                .elseif .xmatch( {.mid(close - 1, 1 ,{op})}, y)
-                    reg .set ___math::REGY
+                .else
+                    ___findToken {op}, y, regPos
+                    .if regPos && regPos < close
+                        reg .set ___math::REGY
+                    .endif
                 .endif
-                ; if there is a reg, then next has to be a +, or it is an error
-                .if reg 
-                    .if ! .xmatch( {.mid(close - 2, 1 ,{op})}, +) 
+                ; found a valid register? to the left must be a +
+                .if reg
+                    .if ! .xmatch( {.mid(regPos - 1, 1 ,{op})}, +) 
                         .error "Expected: '+'"
                     .endif
-                    ; if here: found '+' followed by 'x' or 'y' at close ']'
-                    ; any other tokens to the close position is our constant to add to the offset
-                    .define _CONST + .mid(open + 1, close - open - 3 ,{op})
+                    .define _CONST + .mid(open + 1, regPos - open - 2, {op}) .mid(regPos + 1, close - regPos - 1, {op})
                 .else
                     ; no registers, constant is whatever is in the '[]'
                     .define _CONST + .mid(open + 1, close - open - 1 ,{op})
@@ -235,23 +240,30 @@ DEBUG_H_ON = 0
         .endif
     .else
         ; no '[]'
-        ; set close value to make the expression below for .mid() become .tcount() only
-        close .set -1
+        ; set value to make the expression below for .mid() become .tcount() only
+        open .set .tcount({op})
         .define _CONST
     .endif
-
+    
+    ; anything after the '[]' pair? this allows index to be anywhere in the expression, rather than only a the end
+    .if (.tcount({op}) > close + 1) && (close > 0 )
+        .define _AFTER () .mid(close + 1, .tcount({op}) - close - 1 , {op})
+    .else
+        .define _AFTER
+    .endif
     .if reg = ___math::REGX
-        .left(1,instr) .mid(0, .tcount({op}) - (close - open) - 1 , {op}) _CONST, x
+        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
     .elseif reg = ___math::REGY                                           
-        .left(1,instr) .mid(0, .tcount({op}) - (close - open) - 1 , {op}) _CONST, y
+        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
     .else                                                                 
-        .left(1,instr) .mid(0, .tcount({op}) - (close - open) - 1 , {op}) _CONST
+        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST
     .endif
     .undefine _CONST
+    .undefine _AFTER
 .endmacro
+
 ; --------------------------------------------------------------------------------------------
 ; SECTION: Compare
-
 
 .scope ___compare
     found       .set 0
@@ -265,11 +277,6 @@ DEBUG_H_ON = 0
         GREATER
         LESS
     .endenum
-    .enum
-        REGA = 1
-        REGX
-        REGY
-    .endenum    
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -426,25 +433,9 @@ DEBUG_H_ON = 0
     ; default:
     reg .set ___math::REGA
     .ifnblank register
-        .if .xmatch (register, a)
-            reg .set ___math::REGA
-        .elseif .xmatch (register, x)
-            reg .set ___math::REGX
-        .elseif .xmatch (register, y)
-            reg .set ___math::REGY
-        .elseif !.match( {register}, abc )
-            .if register <= 3
-                reg .set register
-            .endif
-        .endif
+        reg .set register
     .endif
-    .if reg = ___math::REGA
-        .define _LOAD lda
-    .elseif reg = ___math::REGX
-        .define _LOAD ldx
-    .elseif reg = ___math::REGY
-        .define _LOAD ldy
-    .endif
+   
     ___findMathOperator {exp}, pos1, op1
     carryOp .set ((op1 = ___math::ADDC) || (op1 = ___math::SUBC)) 
     .if op1
@@ -459,52 +450,67 @@ DEBUG_H_ON = 0
         tcount .set .tcount({exp})
     .endif
     
+    .define _RIGHT_EXP .mid(pos1 + 1 + carryOp, tcount - pos1 - 1 - carryOp, {exp})
+    
+      ; override register to A if the following:
+    .if tcount > 1 && ( reg = ___math::REGX || reg = ___math::REGY ) && ( op1 > 2 || (!.match(_RIGHT_EXP, 1)) )  ; ADD and SUB are 1, 2
+        reg .set ___math::REGA
+    .endif
+    
+     .if reg = ___math::REGA
+        .define _LOAD lda
+    .elseif reg = ___math::REGX
+        .define _LOAD ldx
+    .elseif reg = ___math::REGY
+        .define _LOAD ldy
+    .endif
+    
     ; if no registers explicitly defined before the op and something to load:
     .if ! (.xmatch ({ .left(1,{exp}) }, a) || .xmatch ({ .left(1,{exp}) }, x) || .xmatch ({ .left(1,{exp}) }, y) )
         .if (op1 && ( pos1 > 0))
             arraySyntax _LOAD, {.mid(0, pos1, {exp})}
-            ; if no operation, then something to load
         .elseif ! op1
+            ; if no operation, then something to load
             arraySyntax _LOAD, {exp}
         .endif
     .endif
     
-    .define _RIGHT_EXP .mid(pos1 + 1 + carryOp, tcount - pos1 - 1 - carryOp, {exp})
-    ; allow incrementing x or y - allow only ADD or SUB with reg X or Y
-    .if ( reg = ___math::REGX || reg = ___math::REGY ) && op1 > 2 ; ADD and SUB are 1, 2
-        .error "Cannot perform this operation with this register."
-        .fatal "STOP"
-    .endif
     .if reg = ___math::REGX
         .if op1 = ___math::ADD
             .repeat _RIGHT_EXP
                 inx
+                printTokenList inx
             .endrepeat
         .elseif op1 = ___math::SUB
             .repeat _RIGHT_EXP
                 dex
+                printTokenList dex
             .endrepeat            
         .endif
     .elseif reg = ___math::REGY
         .if op1 = ___math::ADD
             .repeat _RIGHT_EXP
                 iny
+                printTokenList iny
             .endrepeat
         .elseif op1 = ___math::SUB
             .repeat _RIGHT_EXP
                 dey
+                printTokenList dey
             .endrepeat
         .endif       
     ; if reg = ___math::REGA :
     .elseif op1 = ___math::ADDC
         .if pos1 + carryOp + 1 = .tcount({exp})
             adc #0
+            printTokenList adc #0
         .else
             arraySyntax adc, {_RIGHT_EXP}
         .endif
     .elseif op1 = ___math::SUBC 
         .if pos1 + carryOp + 1 = .tcount({exp})
             sbc #0
+            printTokenList sbc #0
         .else
             arraySyntax sbc, {_RIGHT_EXP}
         .endif
@@ -517,10 +523,12 @@ DEBUG_H_ON = 0
     .elseif op1 = ___math::SHL
         .repeat _RIGHT_EXP
             asl a
+            printTokenList asl
         .endrepeat
     .elseif op1 = ___math::SHR
         .repeat _RIGHT_EXP
             lsr a
+            printTokenList lsr
         .endrepeat
     .elseif op1 = ___math::AND_
         arraySyntax and, {_RIGHT_EXP}
@@ -535,7 +543,7 @@ DEBUG_H_ON = 0
     .if op2
         evalMathOp { .mid(pos2, .tcount({exp}) - pos2, {exp}) }, register
     .else
-       ___math::regFound .set reg
+       ___math::regFound .set reg ; signal back which register was used for any operation
     .endif
     
 .endmacro
@@ -555,11 +563,11 @@ DEBUG_H_ON = 0
     ; check if register on the right side. Left is always the register.
     left .set 0
     .if .xmatch (_RIGHT, a)
-        left .set ___compare::REGA
+        left .set ___math::REGA
     .elseif .xmatch (_RIGHT, x)
-        left .set ___compare::REGX
+        left .set ___math::REGX
     .elseif .xmatch (_RIGHT, y)
-        left .set ___compare::REGY
+        left .set ___math::REGY
     .endif
 
     ; if we found a register on the right side, pretend it is on the left by switching the compare and the defines
@@ -578,11 +586,11 @@ DEBUG_H_ON = 0
         .undefine _TEMPRIGHT
     .else
         .if .xmatch (_LEFT, a)
-            left .set ___compare::REGA
+            left .set ___math::REGA
         .elseif .xmatch (_LEFT, x)
-            left .set ___compare::REGX
+            left .set ___math::REGX
         .elseif .xmatch (_LEFT, y)
-            left .set ___compare::REGY
+            left .set ___math::REGY
         .endif
     .endif
     ; no registers found, so first we will load a register, or eval an expression
@@ -592,24 +600,24 @@ DEBUG_H_ON = 0
             .if .ismnemonic(_LEFT1)
                 arraySyntax _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
                 .if .xmatch(_LEFT1,lda)
-                    left .set ___compare::REGA
+                    left .set ___math::REGA
                 .elseif .xmatch(_LEFT1,ldx)
-                    left .set ___compare::REGX
+                    left .set ___math::REGX
                 .elseif .xmatch(_LEFT1,ldy)
-                    left .set ___compare::REGY
+                    left .set ___math::REGY
                 .elseif .xmatch(_LEFT1,inx)
-                    left .set ___compare::REGX
+                    left .set ___math::REGX
                 .elseif .xmatch(_LEFT1,dex)
-                    left .set ___compare::REGX
+                    left .set ___math::REGX
                 .elseif .xmatch(_LEFT1,iny)
-                    left .set ___compare::REGY
+                    left .set ___math::REGY
                 .elseif .xmatch(_LEFT1,dey)
-                    left .set ___compare::REGY
+                    left .set ___math::REGY
                 .endif
             .endif
         .endif
         .if ! left
-            evalMathOp {_LEFT}, _LEFT1
+            evalMathOp {_LEFT}
             left .set ___math::regFound
         .endif
         .undefine _LEFT1
@@ -620,11 +628,11 @@ DEBUG_H_ON = 0
        .exitmacro
     .endif
     
-    .if left = ___compare::REGA
+    .if left = ___math::REGA
         arraySyntax cmp, {_RIGHT}
-    .elseif left = ___compare::REGX
+    .elseif left = ___math::REGX
         arraySyntax cpx, {_RIGHT}
-    .elseif left = ___compare::REGY
+    .elseif left = ___math::REGY
         arraySyntax CPY, {_RIGHT}
     .endif
     .if ___compare::operator     = ___compare::GREATER
@@ -658,16 +666,16 @@ DEBUG_H_ON = 0
     .local leftReg
     .local pos
 
+	
     rightReg    .set 0
     leftReg     .set 0    
     pos .set 0
     .ifblank exp
-        .define _EXP register
+        .define _EXP () register
     .else
         ; register passed 'register':
-        .define _EXP exp
-        
-        .if .xmatch(register, a) || .xmatch(register, a:)
+        .define _EXP () exp
+        .if .xmatch(register, a)
             rightReg .set ___math::REGA
         .elseif .xmatch(register, x)
             rightReg .set ___math::REGX
@@ -676,8 +684,8 @@ DEBUG_H_ON = 0
         .else
             .error "Unknown register."
         .endif
-        leftReg .set rightReg
     .endif
+    printTokenList {MB_:REG_: register | EXP_:exp}	
 
     ; find assignment token:
     ___findToken {_EXP}, =, pos
@@ -689,7 +697,16 @@ DEBUG_H_ON = 0
     .endif
     
     .define _LEFT .mid(0, pos, {_EXP})
-    .define _RIGHT .mid(pos + 1, .tcount({_EXP}) - 1, {_EXP})
+    .define _RIGHT .mid(pos + 1, .tcount({_EXP}) - pos - 1, {_EXP})
+    
+    ; find left register
+    .if .xmatch(.left(1, {_LEFT}), a) || .xmatch(.left(1, {_LEFT}), a:)
+        leftReg .set ___math::REGA
+    .elseif .xmatch(.left(1, {_LEFT}), x)
+        leftReg .set ___math::REGX
+    .elseif .xmatch(.left(1, {_LEFT}), y)
+        leftReg .set ___math::REGY
+    .endif
     
     .if ! rightReg ; if no register defined for move yet, see if it is explicitly used on the right side
         .if .xmatch(.left(1, {_RIGHT}), a)
@@ -698,19 +715,13 @@ DEBUG_H_ON = 0
             rightReg .set ___math::REGX
         .elseif .xmatch(.left(1, {_RIGHT}), y)
             rightReg .set ___math::REGY
-        .else
-            rightReg .set ___math::REGA
         .endif
-        
-        ; leftReg won't be defined yet either:
-        .if .xmatch(.left(1, {_LEFT}), a)
-            leftReg .set ___math::REGA
-        .elseif .xmatch(.left(1, {_LEFT}), x)
-            leftReg .set ___math::REGX
-        .elseif .xmatch(.left(1, {_LEFT}), y)
-            leftReg .set ___math::REGY
+        ; no match on right, use any register that may have been found on the left
+        .if !rightReg
+           rightReg .set leftReg
         .endif
     .endif
+    
     
     ; look for any simple math operations on the right side, 
     ; call will output any LOAD first, evaluate any operations
@@ -718,8 +729,10 @@ DEBUG_H_ON = 0
     .if rightReg
         evalMathOp {_RIGHT}, rightReg
     .else
-        evalMathOp {_RIGHT}, .left(1, {_RIGHT})
+        evalMathOp {_RIGHT}
     .endif
+    ; override right side reg if evalMathOp changed it:
+    rightReg .set ___math::regFound
     
     .if ! leftReg ; no register defined? just store: 
         .if rightReg = ___math::REGA
@@ -763,7 +776,7 @@ DEBUG_H_ON = 0
     colonPos .set 0
     ___findToken {statement}, :, colonPos
     .if colonPos
-        .define _S_ () .mid(0, colonPos, {statement})
+        .define _S_() .mid(0, colonPos, {statement})
     .else
         .define _S_() statement
     .endif
@@ -775,7 +788,7 @@ DEBUG_H_ON = 0
         .if ___compare::found
             ___compareM {_S_}
         .else
-            evalMathOp {_S_}, .left (1,{_S_})
+            evalMathOp {_S_}
         .endif
     .else 
         ; if it is a macro, just call the macro:
@@ -796,7 +809,7 @@ DEBUG_H_ON = 0
     .endif
     ; -------------------------------------
     .undefine _S_
-      ; Call again with next if there was a colon found:
+      ; Repeat with next if there was a colon found:
     .if colonPos
         evaluateInstructionOrMacro { .mid ( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} ) }
     .endif
@@ -917,16 +930,20 @@ DEBUG_H_ON = 0
     printTokenList {Branch_Statement: condition}
     
     ; compatibility for older code that doesn't have surrounding braces
+    ; try to help it out by adding some
     .if .not .xmatch (.left(1,{condition}), {(})
-        .warning "Need ("
-       .define _IFEXP_ () ( condition )
-       
-       if _IFEXP_
-       .undefine _IFEXP_
+        .local brace
+        brace .set 0
+        ;.warning "Need ("
+       ___findToken {condition}, goto, brace
+       .if brace
+            if ( .left(brace, {condition}) ) .mid(brace, .tcount({condition}) - brace, {condition})
+        .else 
+            if ( condition )
+        .endif    
+
        .exitmacro
     .endif
-
-    
 
     .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
         .error "Cannot use 'if' statement in conditional expression"
@@ -947,7 +964,7 @@ DEBUG_H_ON = 0
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
     .local foundValidAND                    ;  flag: found an && when scanning ahead while considering if bracket set is inverted
     .local foundValidOR                     ;  flag: found an || when scanning ahead while considering if bracket set is inverted
-    .local exitedBracketSetLevel            ;  when evaluating look-ahead, save the bracket level if exiting the conditions bracket level
+    .local exitedBracketSetLevel            ;  when evaluating look-ahead, save the bracket level if exiting the condition's bracket level
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
     .local foundOR_AND                      ;  flag: matched a AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
@@ -1063,7 +1080,7 @@ DEBUG_H_ON = 0
         ; --------------------------------------------------------------------------------------------
         .elseif xmatchToken {||} || xmatchToken {&&}
             ; see if we need a label here:
-            .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined)
+            .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined) index
                 .if tokenPositionForBranchLabel{i} = currentTokenNumber
                     .ifndef .ident( .sprintf( "IF_LABEL_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} ))
                         .ident( .sprintf( "IF_LABEL_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} )):
@@ -1076,7 +1093,7 @@ DEBUG_H_ON = 0
         .elseif matchToken {abc} || xmatchToken{a} || xmatchToken{x} || xmatchToken{y} || matchToken {::} ; something that could be an identifier, register, or branch setting
         
             ; find statementStartPos and statementTokenCount
-            ; try to match end of statement, but ignore anything in ()
+            ; find end of statement, but ignore anything in ()
             statementStartPos .set currentTokenNumber
             allowAllTokens
             scanAheadBracketLevel .set 0    ; use as temp
@@ -1117,7 +1134,7 @@ DEBUG_H_ON = 0
             scanAheadNegateBrackets .set negateBracketSet
             exitedBracketSetLevel .set 0
             foundOR_AND      .set 0
-            ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' || V set)
+            ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' && V set)
             .repeat .tcount({condition}) - currentTokenNumber
             .if (!EOT) && xmatchToken {)}
                 scanAheadBracketLevel .set scanAheadBracketLevel - 1
