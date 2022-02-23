@@ -1,10 +1,49 @@
 ; --------------------------------------------------------------------------------------------
-; ca65hl macros.
+; Section: ca65hl
 ; 
-; This is a recreation of ca65 macros to allow for some high-level like code
-; This rewrite started around Feb 2022
+; This is a recreation of ca65 macros to allow for some high-level like 
+; structured code for branches and loops.
+; Project (re) started around Feb 2022
+;
+; This file is only macro code, intended to add functionality. No memory is used and no
+; supporting code needed.
+;
+; Some macros are intended to be 'private' to this file. Most of these
+; are prefixed with a triple underscore.
 ; 
+; Macros for use outside of this file:
+;
+; setBranch
+; setLongBranch
+; mb
+; if
+; else
+; elseif
+; endif
+; do
+; while
+; repeat
+; until
+; while <> do
+; endwhile
+; break
+ 
 ; --------------------------------------------------------------------------------------------
+; https://mit-license.org/
+; Copyright © 2022 big.JT@protonmail.com
+; 
+; Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated 
+; documentation files (the “Software”), to deal in the Software without restriction, including without limitation 
+; the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, 
+; and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above 
+; copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+; 
+; THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED 
+; TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
+; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+; DEALINGS IN THE SOFTWARE.
+
 .ifndef _NCA65HL_
 _NCA65HL_ = 1
 
@@ -34,8 +73,7 @@ DEBUG_H_ON = 0
 
 .define greater             G set               ; Use greater and less/equal macros to simulate
 .define lessORequal         G clear
-; --------------------------------------------------------------------------------------------
-; SECTION: Branching
+
 ; --------------------------------------------------------------------------------------------
 ; Branch instructions:
 ; C, Z, N, V, G flag can be followed by the keyword 'set' or 'clear'.
@@ -63,7 +101,8 @@ DEBUG_H_ON = 0
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Branch macros - define the next branch
+; --------------------------------------------------------------------------------------------
+; Branch macros - to define the next branch instruction to be generated
 
 .scope branchSet
     branchDefined .set 0
@@ -137,11 +176,11 @@ DEBUG_H_ON = 0
 .scope FLOW_CONTROL_VALUES
     IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
     BREAK_STATEMENT_COUNT               .set 0  ; break statement counter
-    DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop label counter 
+    DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
-    NEGATE_CONDITION                    .set 0  ; if on, conditions are inverted
-    IF_STATEMENT_ACTIVE                 .set 0  ; if we are executing an 'if' macro (no calling an 'if' while a condition is being processed).
-    LONG_JUMP_ACTIVE                    .set 0  ; use JMP to branch
+    NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
+    IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
+    LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -177,7 +216,7 @@ DEBUG_H_ON = 0
 .endmacro 
 
 ; --------------------------------------------------------------------------------------------
-; Look for '[]' set and treat it as x or y indexed
+; Look for '[]' set and allow as an array, possibly with x or y indexed
 
 .macro arraySyntax instr, op
     .local open
@@ -201,11 +240,11 @@ DEBUG_H_ON = 0
                 reg .set ___math::REGY
             .endif
             .if reg
-                ; require a '+', but allow '[y]' or '[x]' if nothing else: 
+                ; require a +/-, but allow '[y]' or '[x]' if nothing else: 
                 ; if only a 'y' or 'x', define the constant as nothing
                 .if open + 2 = close
                     .define _CONST 
-                    ; if there is a reg, then next has to be a + or -, or it is an error
+                    ; next has to be a + or -, or it is an error
                 .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, +)
                     .define _CONST + .mid(open + 3, close - open - 3 ,{op})
                 .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, -)
@@ -295,7 +334,7 @@ DEBUG_H_ON = 0
     ___compare::operator .set 0
     ___compare::position .set 0
     .repeat .tcount({exp}), i
-    .if .not op
+    .if ! op
         .if .xmatch ( {.mid(i,1,{exp})}, {(} )
             bracketCount .set bracketCount + 1
         .elseif .xmatch ( {.mid(i,1,{exp})}, {)} ) 
@@ -413,7 +452,7 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 
-.macro evalMathOp exp, register
+.macro ___evalMathOp exp, register
 
     .local op1
     .local op2
@@ -541,7 +580,7 @@ DEBUG_H_ON = 0
     .undefine _LOAD
     
     .if op2
-        evalMathOp { .mid(pos2, .tcount({exp}) - pos2, {exp}) }, register
+        ___evalMathOp { .mid(pos2, .tcount({exp}) - pos2, {exp}) }, register
     .else
        ___math::regFound .set reg ; signal back which register was used for any operation
     .endif
@@ -617,7 +656,7 @@ DEBUG_H_ON = 0
             .endif
         .endif
         .if ! left
-            evalMathOp {_LEFT}
+            ___evalMathOp {_LEFT}
             left .set ___math::regFound
         .endif
         .undefine _LEFT1
@@ -665,8 +704,6 @@ DEBUG_H_ON = 0
     .local rightReg
     .local leftReg
     .local pos
-
-	
     rightReg    .set 0
     leftReg     .set 0    
     pos .set 0
@@ -722,16 +759,15 @@ DEBUG_H_ON = 0
         .endif
     .endif
     
-    
     ; look for any simple math operations on the right side, 
     ; call will output any LOAD first, evaluate any operations
     ; from left to right
     .if rightReg
-        evalMathOp {_RIGHT}, rightReg
+        ___evalMathOp {_RIGHT}, rightReg
     .else
-        evalMathOp {_RIGHT}
+        ___evalMathOp {_RIGHT}
     .endif
-    ; override right side reg if evalMathOp changed it:
+    ; override right side reg if ___evalMathOp changed/set it:
     rightReg .set ___math::regFound
     
     .if ! leftReg ; no register defined? just store: 
@@ -767,9 +803,11 @@ DEBUG_H_ON = 0
    .undefine _EXP
 .endmacro
 
-
 ; --------------------------------------------------------------------------------------------
-.macro evaluateInstructionOrMacro statement
+; Recursively evaluate statements: One or more instructions or macros as well as supported comparisions
+; and simple match evaluations.
+
+.macro ___evaluateStatementList statement
 
     ; define and then work with one parameter at a time
     .local colonPos
@@ -788,7 +826,7 @@ DEBUG_H_ON = 0
         .if ___compare::found
             ___compareM {_S_}
         .else
-            evalMathOp {_S_}
+            ___evalMathOp {_S_}
         .endif
     .else 
         ; if it is a macro, just call the macro:
@@ -803,7 +841,7 @@ DEBUG_H_ON = 0
             .elseif .ismnemonic(.left (1,{_S_})) || .xmatch( .left (1,{_S_}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
                 arraySyntax .left (1,{_S_}), {.mid (1, .tcount({_S_}) - 1, {_S_} )}
             .else
-                evalMathOp {_S_}
+                ___evalMathOp {_S_}
             .endif
         .endif
     .endif
@@ -811,16 +849,15 @@ DEBUG_H_ON = 0
     .undefine _S_
       ; Repeat with next if there was a colon found:
     .if colonPos
-        evaluateInstructionOrMacro { .mid ( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} ) }
+        ___evaluateStatementList { .mid ( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} ) }
     .endif
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-;
-; Establish what branch to generate for this condition
-; call evaluateInstructionOrMacro to execute any instructions or macros, set flags for branch before exit
+; Establish what branch to generate for one or more instructions/macros.
+; call ___evaluateStatementList to execute any instructions or macros, set flags for branch before exit
 
-.macro evaluateStatement statement
+.macro ___evaluateBranch statement
 
     .local statementTokenCount
     .local inlineBranchSetPos
@@ -829,7 +866,7 @@ DEBUG_H_ON = 0
     statementTokenCount .set .tcount({statement})
     inlineBranchSetPos .set 0
     negateFlag .set -1          ; temporarily use -1 to mean 'not found'
-    ; find '==', or '!=' for setting a branch
+    ; find possible '==', or '!=' for setting a branch
     .if .tcount({statement}) > 2
         ___findToken {statement}, !, inlineBranchSetPos
         .if inlineBranchSetPos
@@ -856,9 +893,7 @@ DEBUG_H_ON = 0
     
     ; find branch setting - either first token or after '==', '!=' 
     ; check branch setting is valid: if branch setting with 2 tokens, and no '==', '!=' then done
-    
     .define _flagMatch (f) .xmatch ({.mid(inlineBranchSetPos, 1, {statement})}, {f} ) 
-    
     .if _flagMatch {C} || _flagMatch {Z} || _flagMatch {N} || _flagMatch {V} || _flagMatch {G}
         ; if 2 tokens for flag set:
         .if .tcount({statement}) - inlineBranchSetPos = 2
@@ -879,15 +914,13 @@ DEBUG_H_ON = 0
             invertBranchCondition
         .endif
     .endif
-    
     .undefine _flagMatch
     
     ; branch condition possibly defined now. If it is not, or there is a '==', '!=' , that means there is something to execute
     ; (if a macro call tries to set the flags it will not be honored if flags already set via inlineBranchSetPos)
     .if (.not branchSet::branchDefined ) || inlineBranchSetPos
-        evaluateInstructionOrMacro {.mid(0, statementTokenCount, {statement})}
+        ___evaluateStatementList {.mid(0, statementTokenCount, {statement})}
     .endif
-    
     ; still no branch? default to non-zero is 'true'
     .if .not branchSet::branchDefined
         ___setBranch Z clear
@@ -899,7 +932,7 @@ DEBUG_H_ON = 0
 ; macro for helping to evaluate || and && tokens with a possible negate applied to a bracket set
 ; from inside .macro 'if'
 
-.macro xmatchSpecial token, match, negateBracketSet
+.macro ___xmatchSpecial token, match, negateBracketSet
     match .set 0        ; set false by default
     .if .xmatch ({token} , {&&})        ; want to try and find an &&
         .if negateBracketSet ; are we inside a negated bracket set?
@@ -924,6 +957,9 @@ DEBUG_H_ON = 0
     .endif
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+; The core of functionality for this file. Evaluates a condition and 
+; generates branches. Calls other macros to process statements to code output.
 
 .macro if condition
     
@@ -935,8 +971,11 @@ DEBUG_H_ON = 0
         .local brace
         brace .set 0
         ;.warning "Need ("
-       ___findToken {condition}, goto, brace
-       .if brace
+        ___findToken {condition}, goto, brace
+        .if !brace
+            ___findToken {condition}, goto, brace
+        .endif
+        .if brace
             if ( .left(brace, {condition}) ) .mid(brace, .tcount({condition}) - brace, {condition})
         .else 
             if ( condition )
@@ -986,7 +1025,7 @@ DEBUG_H_ON = 0
     exitedBracketSetLevel   .set 0
     scanAheadNegateBrackets .set 0
     
-    ; array for label locations:
+    ; array for label locations: (use global to reuse ident)
     .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("_BRANCH_LABEL_%02X", c))    
     
     startTokenListEval {condition}    ; use token macros to make processing tokens a bit easier
@@ -1024,13 +1063,11 @@ DEBUG_H_ON = 0
         .if .xmatch( .mid(lastCloseBracketPos + 1, 1, {condition}), goto )
             gotoUserLabel .set 1
             .define conditionFailLabel ifEndIfCodeBlockStart_IfGotoFail
-            
             .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
                 .define conditionPassLabel longJumpToEndIf_IfGotoPass
             .else
                 .define conditionPassLabel .mid(lastCloseBracketPos + 2, .tcount({condition}) - lastCloseBracketPos - 2, {condition}) ; capture everything after the 'goto'
             .endif
-            setTokenCount lastCloseBracketPos + 1 ; set max tokens to exclude the goto and label
         .elseif .xmatch( .mid(lastCloseBracketPos + 1, 1, {condition}), break )
             ___checkBreakInsideLoop               ; valid break?  
             gotoBreakLabel .set 1
@@ -1040,10 +1077,10 @@ DEBUG_H_ON = 0
             .else
                 .define conditionPassLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
             .endif
-            setTokenCount lastCloseBracketPos + 1 ; set max tokens to exclude the goto and label
         .else
             .error "'goto' or 'break' expected."
         .endif
+        setTokenCount lastCloseBracketPos + 1 ; set max tokens to exclude the goto and label
     .else
         .define conditionPassLabel ifEndIfCodeBlockStart_IfGotoFail
         .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
@@ -1055,9 +1092,9 @@ DEBUG_H_ON = 0
     
     ; --------------------------------------------------------------------------------------------
     ; main loop: evaluate branches and AND OR conditions
-    ; loop over all tokens, but do nothing if all tokens used up
+    ; loop over all tokens, but do nothing if at EOT
     .repeat .tcount({condition})
-    .if .not EOT
+    .if !EOT
         ; --------------------------------------------------------------------------------------------
         .if xmatchToken {!}
             negateNext .set ! negateNext           
@@ -1113,18 +1150,15 @@ DEBUG_H_ON = 0
             previousToken
             verifyNextToken { ) || && }
             nextToken
-            ; evaluate the statement and determine the condition
-            evaluateStatement {.mid(statementStartPos, statementTokenCount, {condition})}
+            ; evaluate the statement(s) and determine the branch 
+            ___evaluateBranch {.mid(statementStartPos, statementTokenCount, {condition})}
     
-            .if negateNext
-                invertBranchCondition
-                negateNext .set 0
-            .endif
-            .if negateBracketSet
+            .if negateNext^negateBracketSet
                 invertBranchCondition
             .endif
+            negateNext .set 0
             
-            ; skip ahead in the token list temporarily:
+            ; save, skip ahead in the token list temporarily:
             allowAllTokens              
             saveTokenListPosition
             saveStackPointer "_IF_NEGATE_STACK_"
@@ -1133,7 +1167,7 @@ DEBUG_H_ON = 0
             scanAheadBracketLevel .set bracketLevel
             scanAheadNegateBrackets .set negateBracketSet
             exitedBracketSetLevel .set 0
-            foundOR_AND      .set 0
+            foundOR_AND .set 0
             ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' && V set)
             .repeat .tcount({condition}) - currentTokenNumber
             .if (!EOT) && xmatchToken {)}
@@ -1144,7 +1178,7 @@ DEBUG_H_ON = 0
             .endrepeat
             ; --------------------------------------------------------------------------------------------
             ; where to branch to depends on next token
-            xmatchSpecial {&&}, foundValidAND, scanAheadNegateBrackets ; special token match, considers negated bracket set
+            ___xmatchSpecial {&&}, foundValidAND, scanAheadNegateBrackets ; special token match, considers negated bracket set
             .if foundValidAND
                 ; Example: C set && V set || Z set
                 ;  Pass: C is set: do not branch
@@ -1157,7 +1191,7 @@ DEBUG_H_ON = 0
                 ; look ahead in token list without disturbing the current state:
                 nextToken ; skip && token, but not skipped for main loop
                 .repeat .tcount({condition}) - currentTokenNumber
-                .if (.not EOT ) && (.not foundTokenPosition)
+                .if (!EOT) && (!foundTokenPosition)
                     .if xmatchToken {(}
                         scanAheadBracketLevel .set scanAheadBracketLevel + 1
                         stackPush "_IF_NEGATE_STACK_", scanAheadNegateBrackets   ; this value doesn't matter, but keeps the stack in order
@@ -1170,7 +1204,7 @@ DEBUG_H_ON = 0
                         .endif
                         stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                     .else
-                        xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
+                        ___xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
                             ; did we exit the brackets? if yes then any valid OR for branch must be in a lower set of brackets
                             .if exitedBracketSetLevel
@@ -1189,7 +1223,7 @@ DEBUG_H_ON = 0
             ; --------------------------------------------------------------------------------------------
             ; END .if xmatchToken {&&}
             .else
-                xmatchSpecial {||}, foundValidOR, scanAheadNegateBrackets ; special token match, considers negated bracket set
+                ___xmatchSpecial {||}, foundValidOR, scanAheadNegateBrackets ; special token match, considers negated bracket set
                 .if foundValidOR
                     ; Example: C set || V set && Z set
                     ;  Pass: C is set: branch to next && in this bracket level:
@@ -1203,7 +1237,7 @@ DEBUG_H_ON = 0
                     ; look ahead in token list without disturbing the current state:
                     nextToken ; skip || token, but not skipped for main loop
                     .repeat .tcount({condition}) - currentTokenNumber
-                    .if (.not EOT ) && (.not foundTokenPosition)
+                    .if (!EOT) && (!foundTokenPosition)
                         .if xmatchToken {(}
                             scanAheadBracketLevel .set scanAheadBracketLevel + 1
                             stackPush "_IF_NEGATE_STACK_", scanAheadNegateBrackets   ; this value doesn't matter, but keeps the stack in order
@@ -1216,7 +1250,7 @@ DEBUG_H_ON = 0
                             .endif
                             stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                         .else
-                            xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
+                            ___xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
                                 ; did we exit our brackets? if yes then any valid AND must be in a lower set of brackets
                                 .if exitedBracketSetLevel
@@ -1252,7 +1286,7 @@ DEBUG_H_ON = 0
                 .endif
             .else ; no || or && found that applies to this branch:
                 ; branch directly to pass condition on goto/break, invert and branch to ENDIF
-                ; for If..ENDIF statements. Flip this when long jumps are active.
+                ; for IF..ENDIF statements. Flip this when long jumps are active.
                 .if (gotoUserLabel || gotoBreakLabel) ^ FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
                     .define branchToLabel conditionPassLabel
                 .else
@@ -1276,13 +1310,11 @@ DEBUG_H_ON = 0
     ; when long jump active, if..endif will branch here on fail, goto/break will branch here on pass:
     .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
         longJumpToEndIf_IfGotoPass:
-        .if gotoUserLabel || gotoBreakLabel
-            .if gotoUserLabel
-                .define jmpToLabel .mid(lastCloseBracketPos + 2, .tcount({condition}) - lastCloseBracketPos - 2, {condition})
-            .else ;break:
-                .define jmpToLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
-            .endif
-        .else ; endif:
+        .if gotoUserLabel
+            .define jmpToLabel .mid(lastCloseBracketPos + 2, .tcount({condition}) - lastCloseBracketPos - 2, {condition})
+        .elseif gotoBreakLabel
+            .define jmpToLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+        .else
             .define jmpToLabel .ident( .sprintf( "_IF_STATEMENT_ENDIF_LABEL_%04X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
         .endif
         jmp jmpToLabel
@@ -1293,7 +1325,7 @@ DEBUG_H_ON = 0
     
     .if gotoBreakLabel
         stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
-    .elseif .not gotoUserLabel
+    .elseif !gotoUserLabel
         stackPush "_IF_ENDIF_STATEMENT_STACK_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
     .endif
     
