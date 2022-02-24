@@ -1,8 +1,21 @@
+; https://mit-license.org/
+; Copyright © 2022 big.JT@protonmail.com
+; 
+; Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated 
+; documentation files (the “Software”), to deal in the Software without restriction, including without limitation 
+; the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, 
+; and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above 
+; copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+; 
+; THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED 
+; TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
+; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+; DEALINGS IN THE SOFTWARE.
 ; --------------------------------------------------------------------------------------------
-; File: newStack.h
+; Section: stacks.h
 ;
 ; Macros for stacks in ca65
-
 
 ; --------------------------------------------------------------------------------------------
 ; SECTION: Stack
@@ -20,7 +33,7 @@ _STACKS = 1
 .endscope
 
 ; --------------------------------------------------------------------------------------------
-; save ans restore a stack pointer - can only save one at a time
+; save and restore a stack pointer - can only save one at a time
 
 .macro saveStackPointer stackname
     .if stacksValues::saveStackPointer <> -1
@@ -73,7 +86,7 @@ _STACKS = 1
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; look at a value from a named stack without changing it
+; look at a value from a named stack without changing the stack
 ; stackname - string
 ; value - ident to pop/store value into
 
@@ -93,6 +106,7 @@ _STACKS = 1
 ; Save a list of tokens to a named stack
 ; stackname - string to identify stack
 ; tokenList - any number of tokens that could be valid in ca65 (doesn't have to be valid code)
+; After a pop, access the token list with poppedTokenList
 
 .macro _pushTokenList stackname, tokenList
     .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))

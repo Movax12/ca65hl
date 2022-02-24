@@ -6,7 +6,7 @@
 ; Project (re) started around Feb 2022
 ;
 ; This file is only macro code, intended to add functionality. No memory is used and no
-; supporting code needed.
+; supporting 6502 code needed.
 ;
 ; Some macros are intended to be 'private' to this file. Most of these
 ; are prefixed with a triple underscore.
@@ -973,7 +973,7 @@ DEBUG_H_ON = 0
         ;.warning "Need ("
         ___findToken {condition}, goto, brace
         .if !brace
-            ___findToken {condition}, goto, brace
+            ___findToken {condition}, break, brace
         .endif
         .if brace
             if ( .left(brace, {condition}) ) .mid(brace, .tcount({condition}) - brace, {condition})
@@ -1080,7 +1080,7 @@ DEBUG_H_ON = 0
         .else
             .error "'goto' or 'break' expected."
         .endif
-        setTokenCount lastCloseBracketPos + 1 ; set max tokens to exclude the goto and label
+        setTokenCount lastCloseBracketPos + 1 ; set max tokens for EOT to exclude the goto and label
     .else
         .define conditionPassLabel ifEndIfCodeBlockStart_IfGotoFail
         .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
@@ -1146,7 +1146,6 @@ DEBUG_H_ON = 0
             .endif
             .endrepeat
             statementTokenCount .set currentTokenNumber - statementStartPos
-            
             previousToken
             verifyNextToken { ) || && }
             nextToken
