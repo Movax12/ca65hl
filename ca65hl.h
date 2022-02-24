@@ -1,10 +1,26 @@
 ; --------------------------------------------------------------------------------------------
+; https://mit-license.org/
+; Copyright © 2022 big.JT@protonmail.com
+; 
+; Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated 
+; documentation files (the “Software”), to deal in the Software without restriction, including without limitation 
+; the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, 
+; and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above 
+; copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+; 
+; THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED 
+; TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
+; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+; DEALINGS IN THE SOFTWARE.
+; --------------------------------------------------------------------------------------------
 ; Section: ca65hl
 ; 
-; This is a recreation of ca65 macros to allow for some high-level like 
-; structured code for branches and loops.
-; Project (re) started around Feb 2022
+; This is a recreation of ca65 macros to allow for some high-level like structured code for branches and loops.
+; This code started (rewritten) around Feb 2022
 ;
+; --------------------------------------------------------------------------------------------
+
 ; This file is only macro code, intended to add functionality. No memory is used and no
 ; supporting 6502 code needed.
 ;
@@ -27,22 +43,6 @@
 ; while <> do
 ; endwhile
 ; break
- 
-; --------------------------------------------------------------------------------------------
-; https://mit-license.org/
-; Copyright © 2022 big.JT@protonmail.com
-; 
-; Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated 
-; documentation files (the “Software”), to deal in the Software without restriction, including without limitation 
-; the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, 
-; and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above 
-; copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-; 
-; THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED 
-; TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
-; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
-; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
-; DEALINGS IN THE SOFTWARE.
 
 .ifndef _NCA65HL_
 _NCA65HL_ = 1
