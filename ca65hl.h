@@ -24,8 +24,7 @@
 ; This file is only macro code, intended to add functionality. No memory is used and no
 ; supporting 6502 code needed.
 ;
-; Some macros are intended to be 'private' to this file. Most of these
-; are prefixed with a triple underscore.
+; Some macros are intended to be 'private' to this file. They are are prefixed with a triple underscore.
 ; 
 ; Macros for use outside of this file:
 ;
@@ -56,9 +55,10 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 ; substitutes for branch mnemonics:
+; 'set' or 'clear' can be added after keywords with no 'set' or 'clear'
 
 .define less                C clear
-.define greaterORequal      C set
+.define greaterORequal      C 
 .define carry               C 
 .define zero                Z
 .define equal               Z
@@ -71,7 +71,7 @@ DEBUG_H_ON = 0
 .define bit6                V 
 .define bitset              Z clear
 
-.define greater             G set               ; Use greater and less/equal macros to simulate
+.define greater             G        ; Use greater and less/equal macros to simulate
 .define lessORequal         G clear
 
 ; --------------------------------------------------------------------------------------------
