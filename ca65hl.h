@@ -55,24 +55,24 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 ; substitutes for branch mnemonics:
-; 'set' or 'clear' can be added after keywords only a single character for the flag
+; 'set' or 'clear' can be added after keywords
 
-.define less                C clear
+.define less               !C
 .define greaterORequal      C 
 .define carry               C 
 .define zero                Z
 .define equal               Z
-.define plus                N clear
-.define positive            N clear
+.define plus               !N 
+.define positive           !N
 .define minus               N
 .define negative            N 
 .define bit7                N 
 .define overflow            V 
 .define bit6                V 
-.define bitset              Z clear
+.define bitset             !Z
 
 .define greater             G        ; Use greater and less/equal macros
-.define lessORequal         G clear
+.define lessORequal        !G
 
 ; --------------------------------------------------------------------------------------------
 ; Local macro to match the next token in the token list passed
@@ -882,7 +882,7 @@ DEBUG_H_ON = 0
     ;defaults:
     statementTokenCount .set .tcount({statement})
     inlineBranchSetPos .set 0
-    negateFlag .set -1          ; temporarily use -1 to mean 'not found'
+    negateFlag .set -1          ; use -1 to mean 'not found'
     ; find possible '==', or '!=' for setting a branch:
     .if .tcount({statement}) > 2
         ___findToken {statement}, !, inlineBranchSetPos
@@ -903,10 +903,16 @@ DEBUG_H_ON = 0
         .if negateFlag > -1
             statementTokenCount .set inlineBranchSetPos
             inlineBranchSetPos .set inlineBranchSetPos + 2 ; position was at first '=' so add 2 to get to the branch condition
+            ; allow flag after '==' or '!=' to be negated via '.not' or '!'
+            .if .xmatch ({.mid(inlineBranchSetPos, 1, {statement})}, ! )
+                inlineBranchSetPos .set inlineBranchSetPos + 1
+                negateFlag .set !negateFlag
+            .endif
         .else
             inlineBranchSetPos .set 0
         .endif
     .endif
+    
     ; find branch setting - either first token or after '==', '!=' 
     ; check branch setting is valid: if branch setting with 2 tokens, and no '==', '!=' then done
     .define _flagMatch (f) .xmatch ({.mid(inlineBranchSetPos, 1, {statement})}, {f} ) 
@@ -931,6 +937,10 @@ DEBUG_H_ON = 0
         .endif
     .endif
     .undefine _flagMatch
+    ; error check: if inlineBranchSetPos is not 0, this indicates '==' or '!=' was found. This means the branch should be defined.
+    .if inlineBranchSetPos && (!___branchSet::branchDefined)
+        .error "Unknown flag for branch."
+    .endif
     ; branch condition possibly defined now. If it is not, or there is a '==', '!=' that means there is something to execute
     ; (if a user macro call tries to set the flags it will not be honored if flags already set via inlineBranchSetPos)
     .if (!___branchSet::branchDefined ) || inlineBranchSetPos
@@ -1194,7 +1204,7 @@ DEBUG_H_ON = 0
             .if foundValidAND
                 ; Example: C set && V set || Z set
                 ;  - Pass: C is set: do not branch
-                ;  - Fail: (branch on inverted condition) to any '||' that is in this bracket level or lower
+                ;  - Fail: (branch on inverted condition) to next '||' in this bracket level or lower
                 ; If no '||' then overall condition is fail, branch to endif or exit for goto/break on the inverted condition
                 invertBranchCondition
                 nextToken ; skip '&&'
@@ -1340,6 +1350,8 @@ DEBUG_H_ON = 0
 
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+
 .macro else knownFlagStatus
     
     .local IF_STATEMENT_COUNT 
@@ -1378,6 +1390,7 @@ DEBUG_H_ON = 0
     
 .endmacro
 
+; --------------------------------------------------------------------------------------------
 
 .macro elseif condition, knownFlagStatus
 
@@ -1417,6 +1430,8 @@ DEBUG_H_ON = 0
     
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+
 .macro endif
 
     .local IF_STATEMENT_COUNT
@@ -1455,6 +1470,7 @@ DEBUG_H_ON = 0
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
 .endmacro
 
+; --------------------------------------------------------------------------------------------
 
 .macro while exp
     .if .xmatch(.right(1, {exp}), do) ; if match 'do' at end this is a while..do..endwhile statement
@@ -1468,9 +1484,12 @@ DEBUG_H_ON = 0
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+
 .macro repeat
     do
 .endmacro
+
+; --------------------------------------------------------------------------------------------
 
 .macro until exp
     .local DO_WHILE_STATEMENT_COUNT
@@ -1495,6 +1514,8 @@ DEBUG_H_ON = 0
     FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT + 1      ; increment while-do counter
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+
 .macro endwhile
     .local WHILE_DO_ENDWHILE_STATEMENT_COUNT
     stackPop "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", WHILE_DO_ENDWHILE_STATEMENT_COUNT                                        ; get the counter
@@ -1508,6 +1529,8 @@ DEBUG_H_ON = 0
     ___generateBreakLabel
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+
 .macro ___verifyBreakInsideLoop
     .local doWhileLoop
     .local whileDoLoop
@@ -1517,6 +1540,8 @@ DEBUG_H_ON = 0
         .error "No loop for 'break'"
     .endif
 .endmacro
+
+; --------------------------------------------------------------------------------------------
 
 .macro break knownFlagStatus
     ___verifyBreakInsideLoop
@@ -1545,7 +1570,6 @@ DEBUG_H_ON = 0
         FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT + 1
     .endif
 .endmacro
-
 
 ; --------------------------------------------------------------------------------------------
 
