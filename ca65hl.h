@@ -873,7 +873,8 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 ; Establish what branch to generate for one or more instructions/macros.
-; call ___evaluateStatementList to execute any instructions or macros, set flags for branch before exit
+; Call ___evaluateStatementList to execute any instructions or macros, then ensure
+; a flag is set for branch before exit.
 
 .macro ___evaluateBranch statement
 
@@ -938,7 +939,7 @@ DEBUG_H_ON = 0
         .endif
     .endif
     .undefine _flagMatch
-    ; error check: if inlineBranchSetPos is not 0, this indicates '==' or '!=' was found. This means the branch should be defined.
+    ; error check: if inlineBranchSetPos is not 0, this indicates '==' or '!=' was found. At this point the branch should be defined.
     .if inlineBranchSetPos && (!___branchSet::branchDefined)
         .error "Unknown flag for branch."
     .endif

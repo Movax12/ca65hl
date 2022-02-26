@@ -11,4 +11,10 @@ Macros for pseudo high-level language structures for the ca65 assembler.
     
     The main feature of the macros is to add IF..ELSEIF..ENDIF flow control.
     
+    To use:
+    In all ca65 source modules that use these macros:
+    `.include "ca65hl.h"`
+    `ca65hl.h` also includes the other `*.h` files in this repository. Put them in the same directory, or 
+    somewhere the ca65 assembler can find them.
+    
     Please see the wiki entries for more information.
