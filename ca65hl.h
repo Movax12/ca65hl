@@ -54,8 +54,10 @@ DEBUG_H_ON = 0
 .include "debug.h"      ; macros to help with debugging
 
 ; --------------------------------------------------------------------------------------------
-; substitutes for branch mnemonics:
-; 'set' or 'clear' can be added after keywords
+; Substitutes for branch mnemonics:
+; Edit or add to as desired.
+; 'set' or 'clear' can be added after keywords when in use.
+; 'set' will have no effect, 'clear' will invert the flag
 
 .define less               !C
 .define greaterORequal      C 
@@ -96,29 +98,28 @@ DEBUG_H_ON = 0
 ; Branch instructions:
 ; C, Z, N, V, G flag can be followed by the keyword 'set' or 'clear'.
 
-.define BranchOn_C_set   BCS
-.define BranchOn_C_clear BCC
-.define BranchOn_Z_set   BEQ
-.define BranchOn_Z_clear BNE
-.define BranchOn_N_set   BMI
-.define BranchOn_N_clear BPL
-.define BranchOn_V_set   BVS
-.define BranchOn_V_clear BVC
+.define BranchOn_C_set   bcs
+.define BranchOn_C_clear bcc
+.define BranchOn_Z_set   beq
+.define BranchOn_Z_clear bne
+.define BranchOn_N_set   bmi
+.define BranchOn_N_clear bpl
+.define BranchOn_V_set   bvs
+.define BranchOn_V_clear bvc
 .define BranchOn_G_set   branchOnGreater
 .define BranchOn_G_clear branchOnLessOrEqual
 
-
-; simulate branches for G flag
+; simulate branches for 'G' greater flag
 
 .macro branchOnGreater label
-    BEQ :+
-    BCS label
+    beq :+
+    bcs label
     :
 .endmacro
 
 .macro branchOnLessOrEqual label
-    BEQ label
-    BCC label
+    beq label
+    bcc label
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
