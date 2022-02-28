@@ -447,9 +447,9 @@ DEBUG_H_ON = 0
                     op .set ___math::SUBC
                 .elseif .xmatch ( {.mid(i,1,{exp})}, - )
                     op .set ___math::SUB
-                .elseif .xmatch ( {.mid(i,1,{exp})}, * )
+                .elseif .xmatch ( {.mid(i,1,{exp})}, * ) ; not implemented
                     op .set ___math::MULT
-                .elseif .xmatch ( {.mid(i,1,{exp})}, / )
+                .elseif .xmatch ( {.mid(i,1,{exp})}, / ) ; not implemented
                     op .set ___math::DIVIDE
                 .elseif .xmatch ( {.mid(i,1,{exp})}, >> )
                     op .set ___math::SHR
@@ -728,7 +728,7 @@ DEBUG_H_ON = 0
     .ifblank exp
         .define _EXP () register
     .else
-        ; register passed 'register':
+        ; register passed in 'register':
         .define _EXP () exp
         .if .xmatch(register, a)
             rightReg .set ___math::REGA
@@ -770,9 +770,8 @@ DEBUG_H_ON = 0
             rightReg .set ___math::REGX
         .elseif .xmatch(.left(1, {_RIGHT}), y)
             rightReg .set ___math::REGY
-        .endif
-        ; no match on right, use any register that may have been found on the left
-        .if !rightReg
+        .else
+            ; no match on right, use any register that may have been found on the left
            rightReg .set leftReg
         .endif
     .endif
@@ -993,7 +992,7 @@ DEBUG_H_ON = 0
     
     printTokenList {Branch_Statement: condition}
     ; --------------------------------------------------------------------------------------------
-    ; compatibility for older code that doesn't have surrounding braces
+    ; compatibility for older code that doesn't have surrounding braces for <condition>
     ; try to help it out by adding some - this will be removed at some point
     .if .not .xmatch (.left(1,{condition}), {(})
         .local brace
@@ -1117,7 +1116,7 @@ DEBUG_H_ON = 0
     ; --------------------------------------------------------------------------------------------
     ; main loop: evaluate branches and AND OR conditions
     ; loop over all tokens, exclude goto/break and anything after
-    ; some tokens will be consumed in the 5th case below, so verify that we are not at EOT
+    ; more than one token will be consumed in the 5th case below, so verify that we are not at EOT
     .repeat conditionTokenCount
     .if !EOT
         ; --------------------------------------------------------------------------------------------
@@ -1271,7 +1270,7 @@ DEBUG_H_ON = 0
                                     .if scanAheadBracketLevel <= exitedBracketSetLevel
                                         foundTokenPosition .set currentTokenNumber
                                     .endif
-                                ; uncomment for left to right precedence. As commented allows ANDs to have precedence     
+                                ; uncomment for left to right precedence. As commented, allows ANDs to have precedence     
                                 ;.elseif scanAheadBracketLevel = bracketLevel
                                 ;    foundTokenPosition .set currentTokenNumber
                                 .endif
