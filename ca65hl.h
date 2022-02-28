@@ -158,20 +158,25 @@ DEBUG_H_ON = 0
 
 ; --------------------------------------------------------------------------------------------
 ; Set the flag to be tested for next branch output, but ignore if branch is already defined.
-; this allows overriding user macro calls to setBranch with inline branch definition via '==', '!='
+; This allows overriding user macro calls to setBranch with inline branch definition via '==', '!='
+; Does some error checking for the user. 
 
 .macro setBranch branch
     .if ! ___branchSet::branchDefined
+        ___branchSet::branchDefined .set 1
         ; error check: must be C Z N V G
         .if !(.xmatch( {.left(1,branch)}, C) || .xmatch( {.left(1,branch)}, Z) || .xmatch( {.left(1,branch)}, N) || .xmatch( {.left(1,branch)}, V) || .xmatch( {.left(1,branch)}, G))
             .error "Expected: Valid flag: C, Z, N, V, G"
         .endif
-        .if !(.xmatch( {.right(1,branch)}, set) || .xmatch( {.right(1,branch)}, clear))
-            .error "Expected: 'set' or 'clear'"
-        .endif
-        ___branchSet::branchDefined .set 1
         setBranchFlag {.left(1,branch)}
-        setBranchCondition {.right(1,branch)}
+        .if .tcount({branch}) > 1
+            .if !(.xmatch( {.right(1,branch)}, set) || .xmatch( {.right(1,branch)}, clear))
+                .error "Expected: 'set' or 'clear'"
+            .endif
+            setBranchCondition {.right(1,branch)}
+        .else
+            setBranchCondition set
+        .endif
     .endif
 .endmacro
 
@@ -1030,7 +1035,7 @@ DEBUG_H_ON = 0
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
     .local foundValidAND                    ;  flag: found an && when scanning ahead while considering if bracket set is inverted
     .local foundValidOR                     ;  flag: found an || when scanning ahead while considering if bracket set is inverted
-    .local exitedBracketSetLevel            ;  when evaluating look-ahead, save the bracket level if exiting the condition's bracket level
+    .local exitedBracketSetLevel            ;  when evaluating look-ahead, save the new bracket level if exiting the condition's bracket level
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
     .local foundOR_AND                      ;  flag: matched a AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
@@ -1371,7 +1376,9 @@ DEBUG_H_ON = 0
     
     ; jump to endif:
     .ifnblank knownFlagStatus
-        Branch {.left(1, knownFlagStatus)}, {.right(1, knownFlagStatus)}, .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
+        setBranch knownFlagStatus
+        Branch branchFlag, branchCondition, .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
+        clearBranchSet
     .else
         jmp .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
     .endif
@@ -1404,7 +1411,9 @@ DEBUG_H_ON = 0
     
     ; jump to endif
     .ifnblank knownFlagStatus
-        Branch {.left(1, knownFlagStatus)}, {.right(1, knownFlagStatus)}, .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
+        setBranch knownFlagStatus
+        Branch branchFlag, branchCondition, .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
+        clearBranchSet
     .else
         jmp .ident( .sprintf( "_IF_STATEMENT_ELSE_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT ))
     .endif

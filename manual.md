@@ -3,8 +3,8 @@
 ### Overview
 
 This is a macro package for use with the ca65 assembler (from the cc65
-cross development package) that adds high-level functionality to the
-assembler. There is no library or 6502 code used, it only extends the
+cross development package) that adds high-level like code structures
+to the assembler. There is no library or 6502 code used, it only extends the
 syntax and functionality of the assembler. At this point it is targeted
 for compatibility with the NMOS 6502; code output will not use more
 advanced features of the 65c02 or higher. All macro code corresponds
@@ -16,7 +16,7 @@ be aware of what optimizations are available.
 The main feature is **if** flow control. The **if** statement logic is
 based on 6502 CPU flags and branch statements, not an evaluation of a
 Boolean expressions. Loop statements are essentially the same thing and
-use the same code.
+use the same macro code.
 
 ## Conditional Expressions
 
@@ -46,8 +46,8 @@ Also accepted: Any number of negate signs in front of the condition:
     endif
 
 Using the [C-style macros](https://cc65.github.io/doc/ca65.html#ss12.7)
-in ca65, it’s trivial to setup (the included) alternative flag names. In
-use, these defines can be followed by **set** or **clear**:
+in ca65, it’s trivial to setup (the included) alternative flag names. When in
+use in a statement, these defines can be followed by **set** or **clear**:
 
     .define less               !C
     .define greaterORequal      C
@@ -65,15 +65,13 @@ use, these defines can be followed by **set** or **clear**:
     .define greater             G
     .define lessORequal        !G
 
-## Macro "Functions" and Inline Code Expressions
+### Macro "Functions" and Inline Code Expressions
 
 If the expression does not match a flag definition as described above,
 and is not an identifier (variable), the macro will attempt to execute
 the passed value as a macro or instruction. If you have defined a macro
-to be called in this way, it could use the macro **setBranch** which
-should be followed by a valid flag definition. The flag setting defined
-this way is what is being treated as 'true' when compared to Boolean
-logic.
+to be called in this way, it can invoke the macro **setBranch** which
+should be followed by a valid flag definition.
 
 Example:
 
@@ -88,22 +86,20 @@ Example:
        .error "No register passed."
      .endif
       setBranch N set        ; tell the conditional statement to test the N flag, could also use 'negative'
-    .endmacro                ; when using this macro, 'N set' could be thought of as true, N clear is false.
+    .endmacro                ; when using this macro, 'N set' could be thought of as true, N clear as false.
 
-The macro defines which CPU flags to test and can then be used in the
-**if** statement:
+The macro defines which CPU flag to test and can then be used in the **if** statement:
 
     if (regNegative a)
         ;code
     endif
 
 As well, assembly code can be used to determine the condition, with any
-number of assembly statements and macros separated by colons. In this
-way, if **setBranch** is not used to define the CPU flag, the double
-equal can be used (==) or the not equal (!=) followed by the flag to be
-tested. The latter will invert the flag to be tested. Example:
+number of assembly statements and macros separated by colons. If **setBranch** is 
+not used to define the CPU flag, double equal (==) or the not equal (!=) followed 
+by the flag to be tested. The latter will invert the flag to be tested. Example:
 
-    if ( lda MyVariable : tay : dey == zero )
+    if ( lda foo : tay : dey == zero )
     ; do code if MyVariable is equal to 1
     endif
 
@@ -113,12 +109,11 @@ Another Example:
      ; do stuff if in range
     endif
 
-**Note:** Using the **==** or **!=** symbol is a way of defining which
-flag to test and is not truly equality. It could be thought of as "If
+Using this method of defining a branch could be thought of as "If
 this *results* in this flag being set/clear then the expression is
 TRUE."
 
-## Logical AND/OR Support
+### Logical AND/OR Support
 
 All conditional statements support logical AND and OR in the the
 expression, with the default operators **&&** and **||** (which will
@@ -136,7 +131,7 @@ Parentheses can be used to generate more complex branching logic:
 
     if ((( lda foo == negative && ldx bar == zero) || lda foo == zero) && (ror bar == C set || ldx baz : inx == zero)) goto myLabel
 
-Logical AND/OR with parentheses can be used in any order to help create
+Logical AND/OR with parentheses can be used in any order to create
 complex branching logic.
 
 Parentheses should also be used to have the macro code ignore an
@@ -191,8 +186,8 @@ Example:
 
 ### Inverting logic
 
-By default, the logical 'boolean not' operator is **.not** or **!**. You
-can negate an individual condition, or an entire parentheses set:
+The 'boolean not' operator is **.not** or **!**. An individual condition, or 
+an entire parentheses set can be negated:
 
     if (!myFlag)
     ; Don't do this unless the flag is clear/false
@@ -213,17 +208,15 @@ These two **if** statements generate equivalent code:
         ; code
     endif
 
-# If Statement
+## If Statement
 
-The **if** statement is quite flexible. There are two kinds: An **if**
-statement starting a block of code and a stand alone **if** statement.
+There are two kinds of **if** statements: An **if** statement starting a 
+block of code and a stand alone **if** statement.
 
-If Statement Code Block
+#### If Statement with Code Block
 
 This is very similar to most high level programming syntax. The keywords
-to create a block are: **if**, **else**, **elseif**, **endif**. The
-conditional expression follows the syntax
-[here.](https://github.com/Movax12/ca65hl/wiki/Conditional-Expressions)
+to create a block are: **if**, **else**, **elseif**, **endif**.
 
     if <condition>
         ; execute here if true
@@ -253,14 +246,14 @@ With **elseif**:
         ;execute here if false
     endif
 
-Long branches
+Long branches:
 
 By default, the if macro will generate appropriate branch opcodes. If
 the branch is too far away ca65 will generate an error. The macro
 command setLongBranch can be used:
 
-    setLongBranch +     ; branch to jmp instruction
-    setLongBranch -     ; use branch instructions.
+    setLongBranch +     ; branch to jmp instruction to control prgram flow
+    setLongBranch -     ; use branch instructions  to control prgram flow
 
 There is also a feature to indicate at link if the long branch was not
 needed: (not implemented yet)
@@ -268,7 +261,7 @@ needed: (not implemented yet)
     setLongBranch +, +    ; if a code block is less than 127 bytes, the linker will say that a long branch is not needed here
     setLongBranch +, -    ; don't warn about code blocks less than 127 bytes
 
-If statement with **goto** or **break**
+#### If Statement with **goto** or **break**
 
     if <conditional expression> goto userLabel
     if <conditional expression> break
@@ -282,7 +275,7 @@ generate a branch to this label. Long branching works here as well.
 When using **break**, the current loop will be exited if the condition
 passes. (If not inside a loop, it will generate an error.)
 
-# Integrated Macros
+## Integrated Macros
 
 There are two macros that are included as a part of this package that
 allow some more features. One is an comparison macro. The other is
@@ -307,10 +300,9 @@ recognized identifier is found, so this also will work:
         ; too high code
     endif
 
-Valid comparison operators: **= &lt;&gt; &gt; &lt; &gt;= ⇐**
+Valid comparison operators: **= &lt;&gt;, &gt;, &lt;, &gt;=, <=**
 
-If you wish to use another register, it will recognize and use the
-appropriate comparison instruction:
+If you wish to use another register:
 
     if ( x < #$60 )
         ;..
@@ -374,9 +366,9 @@ Operators supported:
     &     bit and
     |     bit or
     ^     bit eor
-    +     add, clear carry 1st
+    +     add, clear carry first
     +c    add with carry
-    -     sub, set carry 1st
+    -     sub, set carry first
     -c    sbc with carry
     <<    shift reg a left        (followed by a constant value)
     >>    shift reg a right       (followed by a constant value)
@@ -407,8 +399,8 @@ You can also index with x, or y as allowed by the 6502 instruction set:
 ### Integration Into Conditional Expression Evaluation
 
 When processing a conditional statement, if the statement doesn’t match
-an instruction, macro and any of the supported operators are found, the
-will be evaluated.
+an instruction, macro and any of the operators supported by the **mb** macro are found,
+they will be evaluated.
 
 Examples:
 
@@ -427,12 +419,14 @@ Examples:
 Note: in these examples, the accumulator will be changed, but 'foo' will
 not.
 
-# Loop Structures
+## Loop Structures
 
-There are two main kinds of loops: **do**…​**while &lt;condition&gt;**
-and **while &lt;condition&gt; do**…​**endwhile.**
-
+There are two main kinds of loops: 
 **do**…​**while &lt;condition&gt;**
+and 
+**while &lt;condition&gt; do**…​**endwhile.**
+
+#### The do…while loop
 
 Loop while the condition is true:
 
@@ -465,10 +459,10 @@ example:
         sta puthere, x
     until (inx = #$10)
 
-**while &lt;condition&gt; do**…​**endwhile**
+#### The while - do...endwhile
 
 This is a loop that is started with a condition. (Actual
-implementation:Code following **while** will be output at the position
+implementation: Code following **while** will be output at the position
 of the **endwhile**, and JMP instruction at the start of the loop.)
 
     ldx #$00

@@ -19,4 +19,4 @@ In all ca65 source modules that use these macros:
 The file `ca65hl.h` also includes the other `*.h` files in this repository. Put them in the same directory, or 
 somewhere the ca65 assembler can find them.
 
-Please see the wiki entries for more information.
+Please see manual.md entries for more information.
