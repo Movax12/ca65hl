@@ -416,8 +416,15 @@ Examples:
         ; if all bits match do code
     endif
 
-Note: in these examples, the accumulator will be changed, but 'foo' will
-not.
+The indexed sytax can also be used:
+
+    if ( foo[ x + 3 ] >= #1 )
+        ; 
+    endif
+
+    if ( foo[ 3 ] + #$13 <> #$16 )
+        ;
+    endif
 
 ## Loop Structures
 
