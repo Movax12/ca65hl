@@ -65,6 +65,12 @@ use in a statement, these defines can be followed by **set** or **clear**:
     .define greater             G
     .define lessORequal        !G
 
+Example:
+
+    if (carry set || equal)
+    ; do code here if C flag or Z flag is set
+    endif
+
 ### Macro "Functions" and Inline Code Expressions
 
 If the expression does not match a flag definition as described above,
@@ -85,7 +91,7 @@ Example:
      .else
        .error "No register passed."
      .endif
-      setBranch N set        ; tell the conditional statement to test the N flag, could also use 'negative'
+      setBranch N set        ; tell the conditional statement to test the N flag.
     .endmacro                ; when using this macro, 'N set' could be thought of as true, N clear as false.
 
 The macro defines which CPU flag to test and can then be used in the **if** statement:
@@ -96,8 +102,10 @@ The macro defines which CPU flag to test and can then be used in the **if** stat
 
 As well, assembly code can be used to determine the condition, with any
 number of assembly statements and macros separated by colons. If **setBranch** is 
-not used to define the CPU flag, double equal (==) or the not equal (!=) followed 
-by the flag to be tested. The latter will invert the flag to be tested. Example:
+not used to define the CPU flag, a double equal (==) or not equal (!=) followed 
+by the flag to be tested can be used. The latter will invert the flag to be tested. 
+
+Example:
 
     if ( lda foo : tay : dey == zero )
     ; do code if MyVariable is equal to 1
@@ -109,7 +117,7 @@ Another Example:
      ; do stuff if in range
     endif
 
-Using this method of defining a branch could be thought of as "If
+Using this method of defining a branch, could be thought of as "If
 this *results* in this flag being set/clear then the expression is
 TRUE."
 
@@ -132,7 +140,7 @@ Parentheses can be used to generate more complex branching logic:
     if ((( lda foo == negative && ldx bar == zero) || lda foo == zero) && (ror bar == C set || ldx baz : inx == zero)) goto myLabel
 
 Logical AND/OR with parentheses can be used in any order to create
-complex branching logic.
+branching logic.
 
 Parentheses should also be used to have the macro code ignore an
 enclosed section if required. For example, if your inline macro or code
@@ -186,7 +194,7 @@ Example:
 
 ### Inverting logic
 
-The 'boolean not' operator is **.not** or **!**. An individual condition, or 
+The 'not' operator is **.not** or **!**. An individual condition, or 
 an entire parentheses set can be negated:
 
     if (!myFlag)

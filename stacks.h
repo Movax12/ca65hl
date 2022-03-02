@@ -26,7 +26,6 @@
 .ifndef _STACKS_
 _STACKS = 1
 
-
 .scope stacksValues
     poppedTokenListActive .set 0    ; if the .define poppedTokenList is set
     saveStackPointer      .set -1   ; if save is available 
@@ -89,8 +88,9 @@ _STACKS = 1
 ; look at a value from a named stack without changing the stack
 ; stackname - string
 ; value - ident to pop/store value into
+; sets value to -1 if stack underflow
 
-.macro stackPeek stackname, value ; puts a -1 in var if there is a problem
+.macro stackPeek stackname, value 
     .define thisStackPointer    ::.ident(.sprintf("___%s_STACKPOINTER__", stackname))
     .ifndef thisStackPointer ; stack not defined
         value .set -1
@@ -108,7 +108,7 @@ _STACKS = 1
 ; tokenList - any number of tokens that could be valid in ca65 (doesn't have to be valid code)
 ; After a pop, access the token list with poppedTokenList
 
-.macro _pushTokenList stackname, tokenList
+.macro pushTokenList stackname, tokenList
     .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
     ; if not defined, create it:
     .ifndef thisStackPointer
@@ -125,14 +125,12 @@ _STACKS = 1
     .undefine .ident( .sprintf("%s_%04X_",stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname)) ))
 .endmacro
 
-.macro _popTokenList stackname
+.macro popTokenList stackname
     .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
     .ifndef thisStackPointer ; stack not defined
         .error "Stack underflow."
-        .fatal "STOP"
     .elseif  thisStackPointer - 1 < 0  ; or negative
         .error "Stack underflow."
-        .fatal "STOP"
     .else
         thisStackPointer .set thisStackPointer - 1
         .if stacksValues::poppedTokenListActive
