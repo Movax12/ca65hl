@@ -56,7 +56,7 @@ DEBUG_H_ON = 0
 ; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
 ; 'set' or 'clear' can be added after keywords when in use.
-; 'set' will have no effect, 'clear' will invert the flag
+; 'set' will have no effect, 'clear' will invert the flag.
 
 .define less               !C
 .define greaterORequal      C 
@@ -279,7 +279,7 @@ DEBUG_H_ON = 0
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
     IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
-    NO_USER_GOTO                        .set 0  ; flag: if on, user must only define a condition enclosed in brackets '()'
+    INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -769,7 +769,7 @@ DEBUG_H_ON = 0
     .elseif left = ___math::REGX
         ___arraySyntax cpx, {_RIGHT}
     .elseif left = ___math::REGY
-        ___arraySyntax CPY, {_RIGHT}
+        ___arraySyntax cpy, {_RIGHT}
     .endif
     .if ___compare::operator     = ___compare::GREATER
         ___setBranch G set
@@ -790,12 +790,14 @@ DEBUG_H_ON = 0
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: mb 
+; Function: mb register, exp
 ; Move Byte
-; register - Optional - register to use 
-; exp - expression to process
 ;
-; Move a byte, possibly through some other instructions for basic add/sub or bit-wise operations
+; Parameters:
+;       register - Optional - register to use 
+;       exp - expression to process
+;
+; Move a byte, possibly through some other instructions for basic add/sub or bit-wise operations.
 ; If no register passed, register to use will be searched for, or register A will be used
 ; by default. (The macro will adjust arguments if exp is empty).
 
@@ -824,7 +826,7 @@ DEBUG_H_ON = 0
     .endif
     printTokenList {MB_:REG_: register | EXP_:exp}	
 
-    ; find assignment token:
+    ; find assignment token: (accept := or =)
     ___findToken {_EXP}, =, pos
     .if !pos
         ___findToken {_EXP}, :=, pos
@@ -836,7 +838,7 @@ DEBUG_H_ON = 0
     .define _LEFT .mid(0, pos, {_EXP})
     .define _RIGHT .mid(pos + 1, .tcount({_EXP}) - pos - 1, {_EXP})
     
-    ; find left register
+    ; find left register. 'a:' is a single token in ca65, so accept it too, assume ':' is part of ':='
     .if .xmatch(.left(1, {_LEFT}), a) || .xmatch(.left(1, {_LEFT}), a:)
         leftReg .set ___math::REGA
     .elseif .xmatch(.left(1, {_LEFT}), x)
@@ -1070,6 +1072,8 @@ DEBUG_H_ON = 0
 ;
 ;   condition - Conditional expression to evaluate.
 ;
+; Parenthesis are required around the test condition.
+; 
 ;   Example:
 ; > if (C set || V set) goto label
 ;
@@ -1078,7 +1082,8 @@ DEBUG_H_ON = 0
 ; --------------------------------------------------------------------------------------------
 
 ; The core of functionality for this file. Evaluates a condition and 
-; generates branches. Calls other macros to process statements to code output.
+; generates branches. Calls other macros to process statements and output code/determine what
+; to branch on.
 
 .macro if condition
     
@@ -1103,7 +1108,7 @@ DEBUG_H_ON = 0
     .endif
     ; --------------------------------------------------------------------------------------------
     .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
-        ___error "Cannot use 'if' statement in conditional expression."
+        ___error "Cannot use 'if' statement from within conditional expression."
     .endif
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
     
@@ -1142,7 +1147,7 @@ DEBUG_H_ON = 0
     scanAheadNegateBrackets .set 0
     
     ; array for label locations: (use global to reuse ident)
-    .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("_BRANCH_LABEL_%02X", c))    
+    .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
     ; --------------------------------------------------------------------------------------------
     ; verify brackets:
@@ -1189,7 +1194,7 @@ DEBUG_H_ON = 0
                 .define conditionPassLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
             .endif
         .else
-            .if FLOW_CONTROL_VALUES::NO_USER_GOTO
+            .if FLOW_CONTROL_VALUES::INTERNAL_CALL
                 ___error "Error in expression."
             .else
                 ___error "'goto' or 'break' expected."
@@ -1425,7 +1430,7 @@ DEBUG_H_ON = 0
     .if gotoBreakLabel
         stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
     .elseif !gotoUserLabel
-        stackPush "_IF_ENDIF_STATEMENT_STACK_", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
+        stackPush "IF_STATEMENT_STACK", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
     .endif
     
     FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT + 1    ; increase if statement count always
@@ -1453,7 +1458,7 @@ DEBUG_H_ON = 0
 .macro else knownFlagStatus
     
     .local IF_STATEMENT_COUNT 
-    stackPeek "_IF_ENDIF_STATEMENT_STACK_", IF_STATEMENT_COUNT ; just look, don't touch
+    stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
     .if IF_STATEMENT_COUNT < 0 
         ___error "'else' without 'if'"
     .endif
@@ -1478,7 +1483,7 @@ DEBUG_H_ON = 0
     ; if ELSE_IF_COUNT is defined, means there are one or more ELSEIF, so create a label for the last one,
     ; otherwise, create a label for the originating IF
     .ifdef ELSE_IF_COUNT
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
         ELSE_IF_COUNT .set -1 ; signal it is not needed for the endif macro
     .else
         .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
@@ -1505,7 +1510,7 @@ DEBUG_H_ON = 0
 .macro elseif condition, knownFlagStatus
 
     .local IF_STATEMENT_COUNT
-    stackPeek "_IF_ENDIF_STATEMENT_STACK_", IF_STATEMENT_COUNT ; just look, don't touch
+    stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
     .if IF_STATEMENT_COUNT < 0 
         ___error "'elseif' without 'if'"
     .endif
@@ -1528,15 +1533,15 @@ DEBUG_H_ON = 0
         ELSE_IF_COUNT .set -1 ; start at -1, will be incremented to 0
     .else
         ; this isn't the first ELSEIF: 
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
     .endif
     
     ELSE_IF_COUNT .set ELSE_IF_COUNT + 1
     ; negate statement to GOTO the next ELSEIF/ELSE/ENDIF on failed condition 
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 1
-    if { condition goto .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )) }
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 0
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
+    if { condition goto .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )) }
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     
     .undefine ELSE_IF_COUNT 
@@ -1557,7 +1562,7 @@ DEBUG_H_ON = 0
 
     .local IF_STATEMENT_COUNT
     ; get LIFO label counter
-    stackPop "_IF_ENDIF_STATEMENT_STACK_", IF_STATEMENT_COUNT
+    stackPop "IF_STATEMENT_STACK", IF_STATEMENT_COUNT
     ; check if all okay
     .if IF_STATEMENT_COUNT < 0 
         ___error "'endif' without 'if'"
@@ -1571,7 +1576,7 @@ DEBUG_H_ON = 0
         ; if there was an ELSEIF and last ELSEIF label not handled by an ELSE:
         .ifdef ELSE_IF_COUNT
             .if ELSE_IF_COUNT <> -1
-                .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_ENDIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+                .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
             .endif
         .endif
     .else
@@ -1591,7 +1596,7 @@ DEBUG_H_ON = 0
 
 .macro do
     stackPush "DO_WHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
-    .ident( .sprintf( "_DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)):
+    .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
 .endmacro
 
@@ -1613,9 +1618,9 @@ DEBUG_H_ON = 0
     .else
         .local DO_WHILE_STATEMENT_COUNT
         stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
-        FLOW_CONTROL_VALUES::NO_USER_GOTO .set 1
-        if { condition goto .ident( .sprintf( "_DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
-        FLOW_CONTROL_VALUES::NO_USER_GOTO .set 0
+        FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
+        if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
+        FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
         ___generateBreakLabel
     .endif
 .endmacro
@@ -1647,9 +1652,9 @@ DEBUG_H_ON = 0
     .local DO_WHILE_STATEMENT_COUNT
     stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 1
-    if { condition goto .ident( .sprintf( "_DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 0
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
+    if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     ___generateBreakLabel
 .endmacro
@@ -1702,9 +1707,9 @@ DEBUG_H_ON = 0
     .endif
     popTokenList "WHILE_DO_ENDWHILE_LOOP_STATEMENT"                                                                            ; pop the expression into poppedTokenList
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):                           ; label for JMP from while-do macro
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 1
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if {poppedTokenList goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))}        ; output code to test the condition
-    FLOW_CONTROL_VALUES::NO_USER_GOTO .set 0
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     ___generateBreakLabel
 .endmacro
 
