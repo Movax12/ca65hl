@@ -1,3 +1,4 @@
 *.h gitlab-language=nesasm
+*.h linguist-language=Assembly
 
 
