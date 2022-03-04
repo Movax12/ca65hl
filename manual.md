@@ -168,7 +168,7 @@ Curly braces should be used to enclose the entire parameter line if
 including any commas for any reason, such as an inline index
 instruction:
 
-    if {( ldx list,y == negative )}
+    if {( lda list,y == negative )}
     ; some code
     endif
 
@@ -254,17 +254,27 @@ With **elseif**:
         ;execute here if false
     endif
 
+For greatest compatibility, only pass the single letter flag, with an 
+optional 'set or 'clear' with **else** or **elseif**.
+
 Long branches:
 
 By default, the if macro will generate appropriate branch opcodes. If
 the branch is too far away ca65 will generate an error. The macro
 command setLongBranch can be used:
 
-    setLongBranch +     ; branch to jmp instruction to control prgram flow
-    setLongBranch -     ; use branch instructions  to control prgram flow
+    setLongBranch +     ; use **JMP** instruction to branch
+    setLongBranch -     ; use branch instructions only
+
+Or:
+
+
+    setLongBranch on    ; use **JMP** instruction to branch
+    setLongBranch off   ; use branch instructions only
+
 
 There is also a feature to indicate at link if the long branch was not
-needed: (not implemented yet)
+needed: (Not implemented yet.)
 
     setLongBranch +, +    ; if a code block is less than 127 bytes, the linker will say that a long branch is not needed here
     setLongBranch +, -    ; don't warn about code blocks less than 127 bytes
@@ -277,7 +287,7 @@ needed: (not implemented yet)
 If the statement ends with a **break** or **goto** it will be evaluated
 as a statement on its own and there is no corresponding **endif**.
 
-When using **goto**, a label should immediately follow. The macro will
+When using **goto**, a label name should immediately follow. The macro will
 generate a branch to this label. Long branching works here as well.
 
 When using **break**, the current loop will be exited if the condition
