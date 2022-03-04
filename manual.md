@@ -24,7 +24,7 @@ The **if** statement and looping macros generate branch instructions
 based on the condition passed. In the simplest form they expect an
 expression of both a 6502 flag name as a single uppercase character: **C
 Z N V** or **G**. Followed by **set** or **clear**. Due to this, one
-should avoid using **C Z N V G** or **clear** or **set** as identifiers.
+should avoid using **C Z N V G** or **set** or **clear** as identifiers.
 (**G** represents 'greater than', but this should be avoided where
 possible due to it requiring two branch instructions to evaluate.) The
 **set** or **clear** are not required. If omitted, the flag will be
@@ -251,7 +251,7 @@ With **elseif**:
         ; execute here if true
         lda #1    ; Z flag will not ever be set after this instruction
     elseif <condition>, Z clear
-        ;execute here if false
+        ;execute here if second condition true
     endif
 
 For greatest compatibility, only pass the single letter flag, with an 
@@ -261,15 +261,15 @@ Long branches:
 
 By default, the if macro will generate appropriate branch opcodes. If
 the branch is too far away ca65 will generate an error. The macro
-command setLongBranch can be used:
+command **setLongBranch** can be used:
 
-    setLongBranch +     ; use **JMP** instruction to branch
+    setLongBranch +     ; use JMP instruction to branch
     setLongBranch -     ; use branch instructions only
 
 Or:
 
 
-    setLongBranch on    ; use **JMP** instruction to branch
+    setLongBranch on    ; use JMP instruction to branch
     setLongBranch off   ; use branch instructions only
 
 
@@ -281,8 +281,8 @@ needed: (Not implemented yet.)
 
 #### If Statement with **goto** or **break**
 
-    if <conditional expression> goto userLabel
-    if <conditional expression> break
+    if <condition> goto userLabel
+    if <condition> break
 
 If the statement ends with a **break** or **goto** it will be evaluated
 as a statement on its own and there is no corresponding **endif**.
