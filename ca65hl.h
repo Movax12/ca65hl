@@ -116,7 +116,8 @@ DEBUG_H_ON = 0
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Inline C-style defines that resolve to instructions using macro <___Branch>
+; Inline C-style defines that resolve to instructions.
+; Used with macro <___Branch>
 ; Branch instructions:
 ; C, Z, N, V, G flag can be followed by the keyword 'set' or 'clear'.
 
@@ -273,7 +274,7 @@ DEBUG_H_ON = 0
 
 .scope FLOW_CONTROL_VALUES
     IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
-    BREAK_STATEMENT_COUNT               .set 0  ; break statement counter
+    BREAK_STATEMENT_COUNT               .set 0  ; break statement counter - incremented after break label created
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
@@ -396,7 +397,7 @@ DEBUG_H_ON = 0
     .endif
     .if reg = ___math::REGX
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
-    .elseif reg = ___math::REGY                                           
+    .elseif reg = ___math::REGY  
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
     .else                                                                 
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST
@@ -528,10 +529,10 @@ DEBUG_H_ON = 0
                     op .set ___math::SUBC
                 .elseif .xmatch ( {.mid(i,1,{exp})}, - )
                     op .set ___math::SUB
-                .elseif .xmatch ( {.mid(i,1,{exp})}, * ) ; not implemented
-                    op .set ___math::MULT
-                .elseif .xmatch ( {.mid(i,1,{exp})}, / ) ; not implemented
-                    op .set ___math::DIVIDE
+                ;.elseif .xmatch ( {.mid(i,1,{exp})}, * ) ; not implemented
+                ;    op .set ___math::MULT
+                ;.elseif .xmatch ( {.mid(i,1,{exp})}, / ) ; not implemented
+                ;    op .set ___math::DIVIDE
                 .elseif .xmatch ( {.mid(i,1,{exp})}, >> )
                     op .set ___math::SHR
                 .elseif .xmatch ( {.mid(i,1,{exp})}, << )
@@ -798,8 +799,8 @@ DEBUG_H_ON = 0
 ;       exp - expression to process
 ;
 ; Move a byte, possibly through some other instructions for basic add/sub or bit-wise operations.
-; If no register passed, register to use will be searched for, or register A will be used
-; by default. (The macro will adjust arguments if exp is empty).
+; Can accept one parameter. If no register passed, register to use will be searched for, 
+; or register A will be used by default. (The macro will adjust arguments if exp is empty).
 
 .macro mb register, exp
 
@@ -1039,29 +1040,17 @@ DEBUG_H_ON = 0
 ; --------------------------------------------------------------------------------------------
 ; macro for helping to evaluate || and && tokens with a possible negate applied to a bracket set.
 ; Called from .macro 'if'
+; Will only ever be called with '&&' or '||' for parameter 'token'
 
 .macro ___xmatchSpecial token, match, negateBracketSet
-    match .set 0        ; set false by default
-    .if .xmatch ({token} , {&&})        ; looking to match '&&'
-        .if negateBracketSet ; are we inside a negated bracket set?
-            .if xmatchToken {||}
-                match .set 1
-            .endif
-        .else 
-            .if xmatchToken {&&}
-                match .set 1
-            .endif
+    .if negateBracketSet                    ; inside a negated bracket set?
+        .if .xmatch ({token} , {&&})        ; looking to match '&&'
+            match .set xmatchToken {||}     ; '||' is match
+        .else
+            match .set xmatchToken {&&}     ; else '&&' is match
         .endif
-    .elseif .xmatch ({token}, {||})
-        .if negateBracketSet ; inside a negated bracket set?
-            .if xmatchToken {&&}
-                match .set 1
-            .endif
-        .else 
-            .if xmatchToken {||}
-                match .set 1
-            .endif
-        .endif
+    .else
+        match .set .xmatch ({token}, {currentToken})
     .endif
 .endmacro
 
@@ -1125,7 +1114,7 @@ DEBUG_H_ON = 0
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
     .local foundAND                         ;  flag: found an && when scanning ahead while considering if bracket set is negated
     .local foundOR                          ;  flag: found an || when scanning ahead while considering if bracket set is negated
-    .local exitedBracketSetLevel            ;  when scanning ahead, save the new bracket level if exiting the condition's bracket level
+    .local lowestBracketLevel               ;  when scanning ahead, save the new bracket level if exiting the condition's bracket level
     .local scanAheadNegateBrackets          ;  negate status for brackets when scanning ahead
     .local foundOR_AND                      ;  flag: matched an AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
@@ -1143,7 +1132,7 @@ DEBUG_H_ON = 0
     foundAND                .set 0
     foundOR                 .set 0
     negateStackCounter      .set 0
-    exitedBracketSetLevel   .set 0
+    lowestBracketLevel      .set 0
     scanAheadNegateBrackets .set 0
     
     ; array for label locations: (use global to reuse ident)
@@ -1280,15 +1269,15 @@ DEBUG_H_ON = 0
             saveTokenListPosition
             saveStackPointer "_IF_NEGATE_STACK_"
             foundTokenPosition      .set 0
-            scanAheadBracketLevel   .set bracketLevel
-            scanAheadNegateBrackets .set negateBracketSet
-            exitedBracketSetLevel   .set 0
             foundOR_AND             .set 0
+            scanAheadBracketLevel   .set bracketLevel
+            lowestBracketLevel      .set bracketLevel
+            scanAheadNegateBrackets .set negateBracketSet
             ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' && V set)
             .repeat conditionTokenCount - currentTokenNumber
             .if (!EOT) && xmatchToken {)}
                 scanAheadBracketLevel .set scanAheadBracketLevel - 1
-                exitedBracketSetLevel .set scanAheadBracketLevel
+                lowestBracketLevel .set scanAheadBracketLevel
                 nextToken
             .endif
             .endrepeat
@@ -1309,23 +1298,16 @@ DEBUG_H_ON = 0
                         stackPush "_IF_NEGATE_STACK_", scanAheadNegateBrackets   ; keep the stack in order
                     .elseif xmatchToken {)}
                         scanAheadBracketLevel .set scanAheadBracketLevel - 1
-                        .if scanAheadBracketLevel < bracketLevel
-                            .if !exitedBracketSetLevel
-                                exitedBracketSetLevel .set scanAheadBracketLevel
-                            .endif
+                        .if scanAheadBracketLevel < lowestBracketLevel
+                            lowestBracketLevel .set scanAheadBracketLevel
                         .endif
                         stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
-                    .else
+                        
+                    ; branch to any '||' in the branch's bracket level or lower
+                    .elseif scanAheadBracketLevel = lowestBracketLevel
                         ___xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
-                            ; exit the brackets? if yes then any valid OR for branch must be in a lower set of brackets
-                            .if exitedBracketSetLevel
-                                .if scanAheadBracketLevel <= exitedBracketSetLevel
-                                    foundTokenPosition .set currentTokenNumber
-                                .endif
-                            .elseif scanAheadBracketLevel = bracketLevel
-                                foundTokenPosition .set currentTokenNumber
-                            .endif
+                            foundTokenPosition .set currentTokenNumber
                         .endif
                     .endif
                     nextToken
@@ -1349,24 +1331,17 @@ DEBUG_H_ON = 0
                             stackPush "_IF_NEGATE_STACK_", scanAheadNegateBrackets   ; keep the stack in order
                         .elseif xmatchToken {)}
                             scanAheadBracketLevel .set scanAheadBracketLevel - 1
-                            .if scanAheadBracketLevel < bracketLevel
-                                .if !exitedBracketSetLevel
-                                    exitedBracketSetLevel .set scanAheadBracketLevel
-                                .endif
+                            .if scanAheadBracketLevel < lowestBracketLevel
+                                lowestBracketLevel .set scanAheadBracketLevel
                             .endif
                             stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
-                        .else
+                            
+                        ; exit the brackets? if yes then any valid AND must be in a lower set of brackets,
+                        ; and not in the same level as this branch. (This gives AND precedence.)
+                        .elseif scanAheadBracketLevel = lowestBracketLevel && lowestBracketLevel < bracketLevel
                             ___xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
-                                ; exit the brackets? if yes then any valid AND must be in a lower set of brackets
-                                .if exitedBracketSetLevel
-                                    .if scanAheadBracketLevel <= exitedBracketSetLevel
-                                        foundTokenPosition .set currentTokenNumber
-                                    .endif
-                                ; uncomment for left to right precedence. As commented, allows ANDs to have precedence     
-                                ;.elseif scanAheadBracketLevel = bracketLevel
-                                ;    foundTokenPosition .set currentTokenNumber
-                                .endif
+                                foundTokenPosition .set currentTokenNumber
                             .endif
                         .endif
                         nextToken
@@ -1398,10 +1373,8 @@ DEBUG_H_ON = 0
                     .define branchToLabel conditionFailLabel
                 .endif
             .endif
-            ; output the branch:
-            ___Branch branchFlag, branchCondition, branchToLabel
-            ; clear temporary settings
-            ___clearBranchSet
+            ___Branch branchFlag, branchCondition, branchToLabel    ; output the branch
+            ___clearBranchSet                                       ; clear temporary settings
             restoreTokenListPosition
             restoreStackPointer "_IF_NEGATE_STACK_"
             .undefine branchToLabel
@@ -1569,7 +1542,7 @@ DEBUG_H_ON = 0
     .endif
     
     .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT))
-    ; if label was referenced, it means there was an ELSE or ELSEIF, so create the label
+    ; if label was referenced, it means there was an ELSE or ELSEIF, so create the label,
     ; otherwise, create a label for the originating IF
     .ifref .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
         .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT )):
