@@ -486,9 +486,8 @@ example:
 
 #### The while - do...endwhile
 
-This is a loop that is started with a condition. (Actual
-implementation: Code following **while** will be output at the position
-of the **endwhile**, and JMP instruction at the start of the loop.)
+This is a loop that is started with a condition.
+A **JMP** instruction is used to loop at **endwhile**.
 
     ldx #$00
     while (inx : x < #$10) do       ; loop from x = 1 to 15

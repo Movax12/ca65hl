@@ -1644,17 +1644,15 @@ DEBUG_H_ON = 0
 ;
 ;   See Also:
 ;   <do>, <while>, <repeat>, <until>
-;
-; Note:
-; This macro saves the expression passed and outputs code for it at the <endwhile> statement.
-; This way, only one JMP is executed and the condition is tested at the end of the code block.
 
 .macro while_do condition
     stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
-    ; output a jmp to send execution to the end of the code block for the test condition:
-    jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))   
-    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):            ; loop back here on passed condition
-    pushTokenList "WHILE_DO_ENDWHILE_LOOP_STATEMENT", {condition}                                                              ; save the expression passed
+    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
+    FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
+    if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}
+    FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT + 1      ; increment while-do counter
 .endmacro
 
@@ -1664,9 +1662,6 @@ DEBUG_H_ON = 0
 ; Mark the end of a 'while condition do' code block
 ;
 ; Parameters: none
-;
-; Requires 'do' after the condition to indicate it is the beginning 
-; of a code block.
 ;
 ;   See Also:
 ;   <do>, <while>, <repeat>, <until>
@@ -1678,11 +1673,8 @@ DEBUG_H_ON = 0
     .if WHILE_DO_ENDWHILE_STATEMENT_COUNT < 0                                                                                   ; error check
         ___error "'endwhile' without 'while-do'"
     .endif
-    popTokenList "WHILE_DO_ENDWHILE_LOOP_STATEMENT"                                                                            ; pop the expression into poppedTokenList
-    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):                           ; label for JMP from while-do macro
-    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if {poppedTokenList goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))}        ; output code to test the condition
-    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
+    jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
     ___generateBreakLabel
 .endmacro
 
