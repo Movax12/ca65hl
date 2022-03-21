@@ -24,7 +24,7 @@
 ; stackname - string
 ; value - value to be stored
 .ifndef _STACKS_
-_STACKS = 1
+_STACKS_ = 1
 
 .scope stacksValues
     poppedTokenListActive .set 0    ; if the .define poppedTokenList is set
