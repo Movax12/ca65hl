@@ -46,8 +46,16 @@
 .ifndef _NCA65HL_
 _NCA65HL_ = 1
 
-; temporarily define this here. This should be defined in config.h/makefile/command line for the project 
-DEBUG_H_ON = 0
+; --------------------------------------------------------------------------------------------
+; debugging for this file only. Change this to '1' for info on what this code is doing.
+::__DEBUG_CA65HL__ = 0
+.macro printTokenListDebug parameter
+    .if ::__DEBUG_CA65HL__
+        printTokenList {parameter}
+    .endif
+.endmacro
+; --------------------------------------------------------------------------------------------
+
 
 .include "stacks.h"     ; macros that allow for named stacks 
 .include "tokeneval.h"  ; macros to make token evaluation easier
@@ -332,7 +340,7 @@ DEBUG_H_ON = 0
     close  .set 0
     reg    .set 0
     regPos  .set 0
-    printTokenList {Instruction: instr op}
+    printTokenListDebug {Instruction: instr op}
     
     ___findToken {op}, [, open
     .if open
@@ -574,7 +582,7 @@ DEBUG_H_ON = 0
     reg      .set 0
     
     ___math::regFound .set 0
-    printTokenList {Math eval: exp}
+    printTokenListDebug {Math eval: exp}
     ; default:
     reg .set ___math::REGA
     .ifnblank register
@@ -825,7 +833,7 @@ DEBUG_H_ON = 0
             ___error "Unknown register."
         .endif
     .endif
-    printTokenList {MB_:REG_: register | EXP_:exp}	
+    printTokenListDebug {MB_:REG_: register | EXP_:exp}	
 
     ; find assignment token: (accept := or =)
     ___findToken {_EXP}, =, pos
@@ -920,7 +928,7 @@ DEBUG_H_ON = 0
     .else
         .define S() statement
     .endif
-    printTokenList {Statement: S}
+    printTokenListDebug {Statement: S}
     ; -------------------------------------
     ; first: special case - is a register
     .if .xmatch( .left (1,{S}), a) || .xmatch( .left (1,{S}), x) || .xmatch( .left (1,{S}), y)
@@ -933,7 +941,7 @@ DEBUG_H_ON = 0
     .else 
         ; if it is a macro, just call the macro:
         .if .definedmacro ( .left(1,{S}))
-            printTokenList {Macro: S}
+            printTokenListDebug {Macro: S}
             .left (1,{S})  .mid (1, .tcount({S}) - 1, {S} ) 
         .else
             ; first check for operators that indicate comparison : > < <> >= <=
@@ -1076,25 +1084,25 @@ DEBUG_H_ON = 0
 
 .macro if condition
     
-    printTokenList {Branch_Statement: condition}
+    printTokenListDebug {Branch_Statement: condition}
     ; --------------------------------------------------------------------------------------------
     ; compatibility for older code that doesn't have surrounding braces for <condition>
     ; try to help it out by adding some - this will be removed at some point
-    .if !.xmatch (.left(1,{condition}), {(})
-        .local brace
-        brace .set 0
-        ;.warning "Need ("
-        ___findToken {condition}, goto, brace
-        .if !brace
-            ___findToken {condition}, break, brace
-        .endif
-        .if brace
-            if ( .left(brace, {condition}) ) .mid(brace, .tcount({condition}) - brace, {condition})
-        .else 
-            if ( condition )
-        .endif
-       .exitmacro
-    .endif
+  ;  .if !.xmatch (.left(1,{condition}), {(})
+  ;      .local brace
+  ;      brace .set 0
+  ;      ;.warning "Need ("
+  ;      ___findToken {condition}, goto, brace
+  ;      .if !brace
+  ;          ___findToken {condition}, break, brace
+  ;      .endif
+  ;      .if brace
+  ;          if ( .left(brace, {condition}) ) .mid(brace, .tcount({condition}) - brace, {condition})
+  ;      .else 
+  ;          if ( condition )
+  ;      .endif
+  ;     .exitmacro
+  ;  .endif
     ; --------------------------------------------------------------------------------------------
     .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
         ___error "Cannot use 'if' statement from within conditional expression."
@@ -1591,6 +1599,10 @@ DEBUG_H_ON = 0
     .else
         .local DO_WHILE_STATEMENT_COUNT
         stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+        ; check if all okay
+        .if DO_WHILE_STATEMENT_COUNT < 0 
+            ___error "'while' without 'do'"
+        .endif
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
         if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
@@ -1624,6 +1636,10 @@ DEBUG_H_ON = 0
 .macro until condition
     .local DO_WHILE_STATEMENT_COUNT
     stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+    ; check if all okay
+    .if DO_WHILE_STATEMENT_COUNT < 0 
+        ___error "'until' without 'repeat'"
+    .endif
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
@@ -1657,23 +1673,34 @@ DEBUG_H_ON = 0
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: endwhile
+; Function: endwhile knownFlagStatus
 ;
 ; Mark the end of a 'while condition do' code block
 ;
 ; Parameters: none
 ;
+;   knownFlagStatus - Optional - if a flag is known to be in a state when the else
+;                     is encountered, branch to the end if using this flag as a branch 
+;                     always, using the syntax for <setBranch>
+;
 ;   See Also:
 ;   <do>, <while>, <repeat>, <until>
 ;
 
-.macro endwhile
+.macro endwhile knownFlagStatus
     .local WHILE_DO_ENDWHILE_STATEMENT_COUNT
     stackPop "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", WHILE_DO_ENDWHILE_STATEMENT_COUNT                                        ; get the counter
     .if WHILE_DO_ENDWHILE_STATEMENT_COUNT < 0                                                                                   ; error check
         ___error "'endwhile' without 'while-do'"
     .endif
-    jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+     ; branch or JMP to start of loop
+    .ifnblank knownFlagStatus
+        setBranch knownFlagStatus
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+        ___clearBranchSet
+    .else
+        jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+    .endif
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
     ___generateBreakLabel
 .endmacro

@@ -108,7 +108,7 @@ by the flag to be tested can be used. The latter will invert the flag to be test
 Example:
 
     if ( lda foo : tay : dey == zero )
-    ; do code if MyVariable is equal to 1
+    ; do code if foo is equal to 1
     endif
 
 Another Example:
@@ -494,6 +494,3 @@ A **JMP** instruction is used to loop at **endwhile**.
         lda fromhere, x
         sta puthere, x
     endwhile
-
-For more information see: <a href="https://github.com/Movax12/ca65hl"
-class="bare">https://github.com/Movax12/ca65hl</a>

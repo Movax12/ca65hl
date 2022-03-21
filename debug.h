@@ -17,12 +17,29 @@
 
 ; Macros to help with debugging.
 
-.ifndef _DEBUG_MACROS_
-_DEBUG_MACROS_ = 1
+.ifndef _DEBUG_H_
+_DEBUG_H_ = 1
 
 ; default to off
-.ifndef DEBUG_H_ON
-    DEBUG_H_ON = 0
+.ifndef ::__DEBUG__
+    ::__DEBUG__ = 0
+.endif
+
+; Macros for conditional debug code, TODO reminders, etc
+; --------------------------------------------------------------------------------------------
+
+; use this .define to optionally output a line of code. Any code with a comma should be enclosed in curly braces ( {} )
+
+.if ::__DEBUG__
+    .define debugCode(code) code
+.else 
+    .define debugCode(code)
+.endif
+
+.if ::__DEBUG__
+    .define TODO(text) .out text
+.else 
+    .define TODO(text)
 .endif
 
 ; --------------------------------------------------------------------------------------------
@@ -59,7 +76,7 @@ _DEBUG_MACROS_ = 1
 .macro printTokenList exp
 
     ; exit if not in debug mode
-    .if ::DEBUG_H_ON = 0
+    .if ::__DEBUG__ = 0
         .exitmacro
     .endif
 
