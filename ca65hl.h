@@ -13,6 +13,7 @@
 ; THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
 ; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
 ; DEALINGS IN THE SOFTWARE.
+
 ; --------------------------------------------------------------------------------------------
 ; File: ca65hl.h
 ; Section: ca65hl
@@ -20,7 +21,7 @@
 ; This is a recreation of ca65 macros to allow for some high-level like structured code for branches and loops.
 ; This code started (rewritten) around Feb 2022
 
-
+; --------------------------------------------------------------------------------------------
 ; This file is only macro code, intended to add functionality. No memory is used and no
 ; supporting 6502 code needed.
 ;
@@ -43,20 +44,19 @@
 ; endwhile
 ; break
 
-.ifndef _NCA65HL_
-_NCA65HL_ = 1
+.ifndef ::_CA65HL_H_
+::_CA65HL_H_ = 1
 
 ; --------------------------------------------------------------------------------------------
-; debugging for this file only. Change this to '1' for info on what this code is doing.
+; debugging for this file only. Change this to '1' for some console output.
 ::__DEBUG_CA65HL__ = 0
 .macro printTokenListDebug parameter
     .if ::__DEBUG_CA65HL__
         printTokenList {parameter}
     .endif
 .endmacro
+
 ; --------------------------------------------------------------------------------------------
-
-
 .include "stacks.h"     ; macros that allow for named stacks 
 .include "tokeneval.h"  ; macros to make token evaluation easier
 .include "debug.h"      ; macros to help with debugging
@@ -124,23 +124,6 @@ _NCA65HL_ = 1
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Inline C-style defines that resolve to instructions.
-; Used with macro <___Branch>
-; Branch instructions:
-; C, Z, N, V, G flag can be followed by the keyword 'set' or 'clear'.
-
-.define BranchOn_C_set   bcs
-.define BranchOn_C_clear bcc
-.define BranchOn_Z_set   beq
-.define BranchOn_Z_clear bne
-.define BranchOn_N_set   bmi
-.define BranchOn_N_clear bpl
-.define BranchOn_V_set   bvs
-.define BranchOn_V_clear bvc
-.define BranchOn_G_set   branchOnGreater
-.define BranchOn_G_clear branchOnLessOrEqual
-
-; --------------------------------------------------------------------------------------------
 ; Function: branchOnGreater label, branchOnLessOrEqual label
 ;
 ; Parameters:
@@ -161,11 +144,31 @@ _NCA65HL_ = 1
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Branch macros - to define the next branch instruction to be generated
+; Branch macros section - to define the next branch instruction to be generated
+
+; --------------------------------------------------------------------------------------------
+; keep track if a branch has been defined for the next ___Branch macro
 
 .scope ___branchSet
     branchDefined .set 0
 .endscope
+
+; --------------------------------------------------------------------------------------------
+; Inline C-style defines that resolve to instructions.
+; Used with macro <___Branch>
+; Branch instructions:
+; C, Z, N, V, G flag can be followed by the keyword 'set' or 'clear'.
+
+.define BranchOn_C_set   bcs
+.define BranchOn_C_clear bcc
+.define BranchOn_Z_set   beq
+.define BranchOn_Z_clear bne
+.define BranchOn_N_set   bmi
+.define BranchOn_N_clear bpl
+.define BranchOn_V_set   bvs
+.define BranchOn_V_clear bvc
+.define BranchOn_G_set   branchOnGreater
+.define BranchOn_G_clear branchOnLessOrEqual
 
 ; --------------------------------------------------------------------------------------------
 ; Function: ___Branch (F, S, label)
@@ -174,6 +177,7 @@ _NCA65HL_ = 1
 ;
 ;   F - Flag to indicate branch instruction: C, Z, N, V, G
 ;   S - Status of flag: 'set' or 'clear'
+;   label - label to branch to
 ;
 ; This inline macro will expand to a branch instruction.
 ; (uses .left to turn .ident into a token list: ca65 will recognized as an above .define)
@@ -1067,7 +1071,7 @@ _NCA65HL_ = 1
 ;
 ; Parameters:
 ;
-;   condition - Conditional expression to evaluate.
+;   condition - Conditional expression to evaluate. Requires surrounding braces.
 ;
 ; Parenthesis are required around the test condition.
 ; 
@@ -1165,10 +1169,10 @@ _NCA65HL_ = 1
             conditionTokenCount .set currentTokenNumber + 1
         .endif
     .endrepeat
-    restoreTokenListPosition
     .if bracketLevel <> 0
         ___error "Mismatched parenthesis."
     .endif
+    restoreTokenListPosition
     ; --------------------------------------------------------------------------------------------
     ; find if there is a 'goto' or 'break' keyword:
     ; if there is, set the successful condition to branch to the label/break
@@ -1286,6 +1290,7 @@ _NCA65HL_ = 1
             .if (!EOT) && xmatchToken {)}
                 scanAheadBracketLevel .set scanAheadBracketLevel - 1
                 lowestBracketLevel .set scanAheadBracketLevel
+                stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                 nextToken
             .endif
             .endrepeat
@@ -1425,56 +1430,6 @@ _NCA65HL_ = 1
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: else knownFlagStatus
-;
-; Parameters:
-;
-;   knownFlagStatus - Optional - if a flag is known to be in a state when the else
-;                     is encountered, branch to the end if using this flag as a branch 
-;                     always, using the syntax for <setBranch>
-;
-;   See Also:
-;   <setBranch>, <endif>, <elseif>, <if>
-
-.macro else knownFlagStatus
-    
-    .local IF_STATEMENT_COUNT 
-    stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
-    .if IF_STATEMENT_COUNT < 0 
-        ___error "'else' without 'if'"
-    .endif
-    
-    .ifdef .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT ))
-        ___error "Duplicate 'else'."
-    .endif
-    ; mark this IF as having an ELSE
-    .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT )) = 1
-    
-    ; jump to endif:
-    .ifnblank knownFlagStatus
-        setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
-        ___clearBranchSet
-    .else
-        jmp .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
-    .endif
-    
-    ; elseif counter for this if statement:
-    .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT) )    
-    ; if ELSE_IF_COUNT is defined, means there are one or more ELSEIF, so create a label for the last one,
-    ; otherwise, create a label for the originating IF
-    .ifdef ELSE_IF_COUNT
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
-        ELSE_IF_COUNT .set -1 ; signal it is not needed for the endif macro
-    .else
-        .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
-    .endif
-    
-    .undefine ELSE_IF_COUNT
-    
-.endmacro
-
-; --------------------------------------------------------------------------------------------
 ; Function: elseif condition, knownFlagStatus
 ;
 ; Parameters:
@@ -1530,6 +1485,56 @@ _NCA65HL_ = 1
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+; Function: else knownFlagStatus
+;
+; Parameters:
+;
+;   knownFlagStatus - Optional - if a flag is known to be in a state when the else
+;                     is encountered, branch to the end if using this flag as a branch 
+;                     always, using the syntax for <setBranch>
+;
+;   See Also:
+;   <setBranch>, <endif>, <elseif>, <if>
+
+.macro else knownFlagStatus
+    
+    .local IF_STATEMENT_COUNT 
+    stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
+    .if IF_STATEMENT_COUNT < 0 
+        ___error "'else' without 'if'"
+    .endif
+    
+    .ifdef .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT ))
+        ___error "Duplicate 'else'."
+    .endif
+    ; mark this IF as having an ELSE
+    .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT )) = 1
+    
+    ; jump to endif:
+    .ifnblank knownFlagStatus
+        setBranch knownFlagStatus
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
+        ___clearBranchSet
+    .else
+        jmp .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
+    .endif
+    
+    ; elseif counter for this if statement:
+    .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT) )    
+    ; if ELSE_IF_COUNT is defined, means there are one or more ELSEIF, so create a label for the last one,
+    ; otherwise, create a label for the originating IF
+    .ifdef ELSE_IF_COUNT
+        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+        ELSE_IF_COUNT .set -1 ; signal it is not needed for the endif macro
+    .else
+        .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
+    .endif
+    
+    .undefine ELSE_IF_COUNT
+    
+.endmacro
+
+; --------------------------------------------------------------------------------------------
 ; Function: endif
 ;
 ; End an <if> statement.
@@ -1548,23 +1553,22 @@ _NCA65HL_ = 1
     .if IF_STATEMENT_COUNT < 0 
         ___error "'endif' without 'if'"
     .endif
-    
-    .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT))
+        
     ; if label was referenced, it means there was an ELSE or ELSEIF, so create the label,
     ; otherwise, create a label for the originating IF
     .ifref .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
         .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT )):
         ; if there was an ELSEIF and last ELSEIF label not handled by an ELSE:
+        .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT))
         .ifdef ELSE_IF_COUNT
-            .if ELSE_IF_COUNT <> -1
+            .if ELSE_IF_COUNT <> -1 ; -1 means ELSE handled the last ELSEIF label
                 .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
             .endif
         .endif
+        .undefine ELSE_IF_COUNT 
     .else
         .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
     .endif
-    
-    .undefine ELSE_IF_COUNT 
     
 .endmacro
 
@@ -1748,7 +1752,7 @@ _NCA65HL_ = 1
 ; Function: ___generateBreakLabel checkMoreBreakStatements
 ;
 ; Invoked at the end of a loop macro to check if any labels
-; need to be created for a break command inside that loop.
+; need to be created for a break command from inside that loop.
 ;
 ; Parameters:
 ;   checkMoreBreakStatements - used in recursion to pop any duplicate break values 
