@@ -1085,6 +1085,10 @@
 ; The core of functionality for this file. Evaluates a condition and 
 ; generates branches. Calls other macros to process statements and output code/determine what
 ; to branch on.
+; This macro will create branch instructions with regards to the logic in <condition> and branch
+; to a provided label when used with 'goto'. If used with 'break', it will verify a valid break 
+; (inside a loop) and branch to the next break label. If no 'goto' or 'break', it will branch to 
+; the next ENDIF (or ELSE, or ELSEIF) on an inverted condition.
 
 .macro if condition
     
@@ -1113,8 +1117,8 @@
     .endif
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
     
-    .local ifEndIfCodeBlockStart_IfGotoFail ;  branch to this label on failed condition with a goto statement, or pass condition with a code block defined by if..endif
-    .local longJumpToEndIf_IfGotoPass       ;  for long jump: branch to this label on failed condition with an if..endif statement, or pass condition with goto
+    .local exitBranchEvaluation             ;  label: branch to this label on failed condition (acts like a pass condition with a code block defined by if..endif)
+    .local longJumpLabel                    ;  label: for long jump: branch to this label on a passed condition when long jumps active
     .local negateNext                       ;  flag: if single branch term to be negated              
     .local negateBracketSet                 ;  flag: if a set of terms in brackets to be negated
     .local bracketLevel                     ;  level of brackets we are in, lowest is 1
@@ -1174,26 +1178,18 @@
     .endif
     restoreTokenListPosition
     ; --------------------------------------------------------------------------------------------
-    ; find if there is a 'goto' or 'break' keyword:
-    ; if there is, set the successful condition to branch to the label/break
+    ; Find if there is a 'goto' or 'break' keyword and set the successful condition to branch to the label or break.
+    ; If no 'goto' or 'break', invert the condition and branch to the ENDIF label on successful (inverted) condition.
+    ; conditionPassLabel is the label to branch to if the (inverted) condition is 'true'
+    
     .if conditionTokenCount < .tcount({condition})
         .if .xmatch( .mid(conditionTokenCount, 1, {condition}), goto )
             gotoUserLabel .set 1
-            .define conditionFailLabel ifEndIfCodeBlockStart_IfGotoFail
-            .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-                .define conditionPassLabel longJumpToEndIf_IfGotoPass
-            .else
-                .define conditionPassLabel .mid(conditionTokenCount + 1, .tcount({condition}) - conditionTokenCount - 1, {condition}) ; capture everything after the 'goto'
-            .endif
+            .define destinationLabel .mid(conditionTokenCount + 1, .tcount({condition}) - conditionTokenCount - 1, {condition}) ; capture everything after the 'goto'
         .elseif .xmatch( .mid(conditionTokenCount, 1, {condition}), break )
             ___verifyBreakInsideLoop               ; valid break?  
             gotoBreakLabel .set 1
-            .define conditionFailLabel ifEndIfCodeBlockStart_IfGotoFail
-            .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-                .define conditionPassLabel longJumpToEndIf_IfGotoPass
-            .else
-                .define conditionPassLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
-            .endif
+            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
         .else
             .if FLOW_CONTROL_VALUES::INTERNAL_CALL
                 ___error "Error in expression."
@@ -1202,14 +1198,23 @@
             .endif
         .endif
         setTokenCount conditionTokenCount ; set max tokens for EOT to exclude the goto and label
-    .else
-        .define conditionPassLabel ifEndIfCodeBlockStart_IfGotoFail
-        .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-            .define conditionFailLabel longJumpToEndIf_IfGotoPass
-        .else
-            .define conditionFailLabel .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
-        .endif
+    .else 
+        ; invert condition to branch to the next ENDIF label
+        negateBracketSet .set !negateBracketSet
+        .define destinationLabel .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
     .endif
+    
+    ; If long jump active, invert condition and branch to exitBranchEvaluation to skip the 'jmp destinationLabel'
+    ; In this case a 'pass' or 'true' condition (before it is inverted) will use 'jmp' to branch to the label.
+    .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+        negateBracketSet .set !negateBracketSet
+        .define conditionPassLabel exitBranchEvaluation
+        .define conditionFailLabel longJumpLabel
+    .else
+        .define conditionPassLabel destinationLabel
+        .define conditionFailLabel exitBranchEvaluation
+    .endif
+    
     ; --------------------------------------------------------------------------------------------
     ; Main loop: evaluate branches and AND OR conditions.Loop over all tokens, exclude 
     ; goto/break and anything after. More than one token will be consumed in the 5th case below, 
@@ -1316,8 +1321,10 @@
                         .endif
                         stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                         
-                    ; branch to any '||' in the branch's bracket level or lower
-                    .elseif scanAheadBracketLevel = lowestBracketLevel
+                    ; Branch to any '||' in the branch's bracket level or lower.
+                    ; A negateBracketSet with an '&&' will also match, but in this case:
+                    ; Only branch to a lower bracket to maintain AND precedence.
+                    .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || (!negateBracketSet) )
                         ___xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
                             foundTokenPosition .set currentTokenNumber
@@ -1349,9 +1356,10 @@
                             .endif
                             stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                             
-                        ; exit the brackets? if yes then any valid AND must be in a lower set of brackets,
-                        ; and not in the same level as this branch. (This gives AND precedence.)
-                        .elseif scanAheadBracketLevel = lowestBracketLevel && lowestBracketLevel < bracketLevel
+                        ; Branch to an '&&' only in a lower bracket level to give AND precedence.
+                        ; A negateBracketSet with an '||' will also match, but in this case:
+                        ; Branch to this bracket level or lower to maintain AND precedence.
+                        .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || negateBracketSet )
                             ___xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
                                 foundTokenPosition .set currentTokenNumber
@@ -1378,18 +1386,12 @@
                     .endif
                 .endif
             .else ; no || or && found that affects this branch:
-                ; branch directly to pass condition on goto/break, invert and branch to ENDIF for IF..ENDIF statements. Flip this when long jumps are active.
-                .if (gotoUserLabel || gotoBreakLabel) ^ FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-                    .define branchToLabel conditionPassLabel
-                .else
-                    ___invertBranchCondition
-                    .define branchToLabel conditionFailLabel
-                .endif
+                .define branchToLabel conditionPassLabel
             .endif
             ___Branch branchFlag, branchCondition, branchToLabel    ; output the branch
             ___clearBranchSet                                       ; clear temporary settings
             restoreTokenListPosition
-            restoreStackPointer "_IF_NEGATE_STACK_"
+            restoreStackPointer "_IF_NEGATE_STACK_" 
             .undefine branchToLabel
         .endif
         ; --------------------------------------------------------------------------------------------
@@ -1397,21 +1399,16 @@
     .endif
     .endrepeat
     
-    ; when long jump active, if..endif will branch here on fail, goto/break will branch here on pass:
+    ; when long jump active, JMP to destinationLabel
     .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-        longJumpToEndIf_IfGotoPass:
-        .if gotoUserLabel
-            .define jmpToLabel .mid(conditionTokenCount + 1, .tcount({condition}) - conditionTokenCount - 1, {condition})
-        .elseif gotoBreakLabel
-            .define jmpToLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
-        .else
-            .define jmpToLabel .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
-        .endif
-        jmp jmpToLabel
-        .undefine jmpToLabel
+        longJumpLabel:
+        jmp destinationLabel
     .endif
-    ; local label for branching into the code block, or failing for goto statement:
-    ifEndIfCodeBlockStart_IfGotoFail:   
+    
+    ; Local label for exiting branch code for this evaluation. Branch here when a condition fails, 
+    ; which also is the start of a code block for an IF..ENDIF since it branches to ENDIF on an 
+    ; inverted condition.
+    exitBranchEvaluation:   
     
     .if gotoBreakLabel
         stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
@@ -1423,6 +1420,7 @@
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 0
 
     endTokenListEval ; clear token evaluation    
+    .undefine destinationLabel
     .undefine conditionFailLabel
     .undefine conditionPassLabel
     .undefine tokenPositionForBranchLabel
