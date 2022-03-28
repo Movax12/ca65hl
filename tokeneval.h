@@ -87,7 +87,6 @@ _TOKENEVAL_ = 1
     .local matchFound
     .if !EOT
         tokenListEval::tokenOffset .set tokenListEval::tokenOffset + 1
-        
         .if (!EOT) && tokenListEval::verifyTokenOn
             matchFound .set 0
             .repeat .tcount( {allowedTokens} ), i
