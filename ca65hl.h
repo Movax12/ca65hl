@@ -1124,7 +1124,7 @@
     .local bracketLevel                     ;  level of brackets we are in, lowest is 1
     .local branchLabelCounter               ;  count of how many branch labels to additional OR/AND conditions needed
     .local foundTokenPosition               ;  save token position of found && or || tokens when performing look-ahead evaluating correct branch
-    .local conditionTokenCount              ;  save token count for condition ( could be goto/break statement after)
+    .local conditionTokenCount              ;  save token count for condition (could be goto/break statement after)
     .local gotoUserLabel                    ;  flag: if 'goto' found, branch to label passed in <condition>
     .local gotoBreakLabel                   ;  flag: branch to break label to exit loop
     .local scanAheadBracketLevel            ;  bracket level we are on when scanning ahead
@@ -1135,10 +1135,11 @@
     .local foundOR_AND                      ;  flag: matched an AND or OR when scanning ahead
     .local statementStartPos                ;  token position for start of found statement
     .local statementTokenCount              ;  token count for found statement
+    .local firstBranchToLongJump            ;  for verifying a long jump is needed: address of the first branch that will use a long jump
     
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
-    bracketLevel            .set 1  ; first token will be verified to be a bracket, start at 1 to indicate inside a bracket set
+    bracketLevel            .set 0  ; first bracket level is 1, zero is no brackets (invalid)
     branchLabelCounter      .set 0
     foundTokenPosition      .set 0
     conditionTokenCount     .set 0
@@ -1156,15 +1157,14 @@
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
     ; --------------------------------------------------------------------------------------------
     ; verify brackets:
-    saveTokenListPosition
     previousToken             ; step back before first token
     verifyNextToken {(}       ; make sure to start with a '('
-    nextToken
+    nextToken                 ; check it is a '('
+    saveTokenListPosition
     allowAllTokens
-    .repeat .tcount({condition}) - 1
-        nextToken                 ; skip '(' on first loop
+    .repeat .tcount({condition})
         .if xmatchToken {(}
-            .if bracketLevel < 1
+            .if bracketLevel < 0
                 ___error "Mismatched parenthesis."
             .endif
             bracketLevel .set bracketLevel + 1
@@ -1172,6 +1172,7 @@
             bracketLevel .set bracketLevel - 1
             conditionTokenCount .set currentTokenNumber + 1
         .endif
+        nextToken
     .endrepeat
     .if bracketLevel <> 0
         ___error "Mismatched parenthesis."
@@ -1180,7 +1181,7 @@
     ; --------------------------------------------------------------------------------------------
     ; Find if there is a 'goto' or 'break' keyword and set the successful condition to branch to the label or break.
     ; If no 'goto' or 'break', invert the condition and branch to the ENDIF label on successful (inverted) condition.
-    ; conditionPassLabel is the label to branch to if the (inverted) condition is 'true'
+    ; destinationLabel is the label to branch to if the (inverted) condition is 'true'
     
     .if conditionTokenCount < .tcount({condition})
         .if .xmatch( .mid(conditionTokenCount, 1, {condition}), goto )
@@ -1321,9 +1322,8 @@
                         .endif
                         stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                         
-                    ; Branch to any '||' in the branch's bracket level or lower.
-                    ; A negateBracketSet with an '&&' will also match, but in this case:
-                    ; Only branch to a lower bracket to maintain AND precedence.
+                    ; Branch to any '||' in the branch's bracket level or lower. ie ( scanAheadBracketLevel = lowestBracketLevel )
+                    ; When negated, '||' (an inverted '&&') must be on a lower bracket level to maintain AND precedence.
                     .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || (!negateBracketSet) )
                         ___xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
@@ -1356,8 +1356,9 @@
                             .endif
                             stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                             
-                        ; Branch to an '&&' only in a lower bracket level to give AND precedence.
-                        ; A negateBracketSet with an '||' will also match, but in this case:
+                        ; Branch to an '&&' only in a lower bracket level to give AND precedence. ie:
+                        ; scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel )
+                        ; When negated, a negated '||' will also match, but in this case:
                         ; Branch to this bracket level or lower to maintain AND precedence.
                         .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || negateBracketSet )
                             ___xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
@@ -1381,6 +1382,14 @@
                 .else ; found a '||' or '&&' that affects this branch, but no following '&&','||' to branch to:
                     .if foundAND
                         .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag, e.g.: if ( C set && N set)
+                        
+                        ; if long jumps active, save the first branch that uses the long jump
+                        ; (only conditionFailLabel will be a branch to the long jump)
+                        .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+                            .ifndef firstBranchToLongJump
+                                firstBranchToLongJump = * + 2 ; address for end of next branch
+                            .endif
+                        .endif
                     .else ; foundOR
                         .define branchToLabel conditionPassLabel    ; branch to conditionPassLabel on flag, e.g.: if ( C set || N set)
                     .endif
@@ -1403,6 +1412,16 @@
     .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
         longJumpLabel:
         jmp destinationLabel
+        ; if destinationLabel is defined it means this is a branch to a lower address
+        .ifdef destinationLabel
+            .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reaching without a long branch. (Try 'setLongBranch -')."
+        .else ; a branch to a higher address:
+            .ifndef firstBranchToLongJump
+                firstBranchToLongJump = longJumpLabel
+            .endif
+            ; - 3 for the JMP $0000 command
+            .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reaching without a long branch. (Try 'setLongBranch -')."
+        .endif
     .endif
     
     ; Local label for exiting branch code for this evaluation. Branch here when a condition fails, 
