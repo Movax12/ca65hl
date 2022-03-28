@@ -292,6 +292,7 @@
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
     IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
+    LONG_JUMP_WARNINGS                  .set 1  ; flag: output warnings if long jump not needed
     INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
 .endscope
 
@@ -306,6 +307,15 @@
         FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE .set 0
     .else
         ___error "Unknown long branch setting."
+    .endif
+    .ifnblank v
+        .if .xmatch(v, on) || .xmatch(v, +)
+            FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS .set 1
+        .elseif .xmatch(v, off) || .xmatch(v, -)
+            FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS .set 0
+        .else
+            ___error "Unknown long branch setting."
+        .endif
     .endif
 .endmacro 
 
@@ -1413,14 +1423,16 @@
         longJumpLabel:
         jmp destinationLabel
         ; if destinationLabel is defined it means this is a branch to a lower address
-        .ifdef destinationLabel
-            .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
-        .else ; a branch to a higher address:
-            .ifndef firstBranchToLongJump
-                firstBranchToLongJump = longJumpLabel
+        .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
+            .ifdef destinationLabel
+                .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
+            .else ; a branch to a higher address:
+                .ifndef firstBranchToLongJump
+                    firstBranchToLongJump = longJumpLabel
+                .endif
+                ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
+                .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
             .endif
-            ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
-            .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
         .endif
     .endif
     
