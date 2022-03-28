@@ -1414,13 +1414,13 @@
         jmp destinationLabel
         ; if destinationLabel is defined it means this is a branch to a lower address
         .ifdef destinationLabel
-            .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reaching without a long branch. (Try 'setLongBranch -')."
+            .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
         .else ; a branch to a higher address:
             .ifndef firstBranchToLongJump
                 firstBranchToLongJump = longJumpLabel
             .endif
-            ; - 3 for the JMP $0000 command
-            .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reaching without a long branch. (Try 'setLongBranch -')."
+            ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
+            .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
         .endif
     .endif
     
