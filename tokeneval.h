@@ -53,7 +53,7 @@ _TOKENEVAL_ = 1
     .define currentToken ()  .mid (tokenListEval::tokenOffset, 1, {thisTokenList} )
     .define matchToken (t) .match ( {t}, {currentToken} )
     .define xmatchToken (t) .xmatch ( {t}, {currentToken} )
-    .define EOT () ( tokenListEval::tokenOffset + 1 = tokenListEval::tokenCount )
+    .define EOT () ( tokenListEval::tokenOffset + 1 > tokenListEval::tokenCount )
     .define currentTokenNumber tokenListEval::tokenOffset
     .define allowedTokens
 .endmacro
@@ -85,9 +85,10 @@ _TOKENEVAL_ = 1
 
 .macro nextToken
     .local matchFound
-    .if tokenListEval::tokenOffset + 1 < tokenListEval::tokenCount
+    .if !EOT
         tokenListEval::tokenOffset .set tokenListEval::tokenOffset + 1
-        .if tokenListEval::verifyTokenOn
+        
+        .if (!EOT) && tokenListEval::verifyTokenOn
             matchFound .set 0
             .repeat .tcount( {allowedTokens} ), i
                 .if .match(  {currentToken}, { .mid( i,1,{allowedTokens} ) } )
