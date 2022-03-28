@@ -53,7 +53,7 @@ _TOKENEVAL_ = 1
     .define currentToken ()  .mid (tokenListEval::tokenOffset, 1, {thisTokenList} )
     .define matchToken (t) .match ( {t}, {currentToken} )
     .define xmatchToken (t) .xmatch ( {t}, {currentToken} )
-    .define EOT () ( tokenListEval::tokenOffset  = tokenListEval::tokenCount )
+    .define EOT () ( tokenListEval::tokenOffset + 1 = tokenListEval::tokenCount )
     .define currentTokenNumber tokenListEval::tokenOffset
     .define allowedTokens
 .endmacro
@@ -77,7 +77,7 @@ _TOKENEVAL_ = 1
 ; Override the total amount of tokens for current token list
 
 .macro setTokenCount count
-     tokenListEval::tokenCount .set count
+    tokenListEval::tokenCount .set count
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -85,16 +85,16 @@ _TOKENEVAL_ = 1
 
 .macro nextToken
     .local matchFound
-    matchFound .set 0
-    tokenListEval::tokenOffset .set tokenListEval::tokenOffset + 1
-    .if .not EOT
+    .if tokenListEval::tokenOffset + 1 < tokenListEval::tokenCount
+        tokenListEval::tokenOffset .set tokenListEval::tokenOffset + 1
         .if tokenListEval::verifyTokenOn
+            matchFound .set 0
             .repeat .tcount( {allowedTokens} ), i
                 .if .match(  {currentToken}, { .mid( i,1,{allowedTokens} ) } )
                     matchFound .set 1
                 .endif
             .endrepeat
-            .if .not matchFound
+            .if !matchFound
                 ; it would be nice to output the offending token, but .string() doesn't work with all tokens
                 .error "Error in expression."
                 .fatal "STOP"
