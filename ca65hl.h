@@ -1133,7 +1133,7 @@
     .local firstBranchToLongJump     ;  label: for verifying a long jump is needed: address from the first branch that will use a long jump
     .local negateBracketSet          ;  flag: if a set of terms in brackets to be negated
     .local negateNext                ;  flag: if single branch term to be negated              
-    .local bracketLevel              ;  level of brackets we are in, lowest is 1
+    .local bracketLevel              ;  level of brackets we are in, lowest is 1, 0 is outside brackets
     .local branchLabelCounter        ;  count of how many branch labels to additional OR/AND conditions needed
     .local conditionTokenCount       ;  save token count for condition only (could be goto/break statement after)
     .local gotoUserLabel             ;  flag: if 'goto' found, branch to label passed in <condition>
@@ -1150,7 +1150,7 @@
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
-    bracketLevel            .set 0  ; first bracket level is 1, zero is no brackets (invalid)
+    bracketLevel            .set 0
     branchLabelCounter      .set 0
     conditionTokenCount     .set 0
     gotoUserLabel           .set 0
@@ -1179,13 +1179,13 @@
     allowAllTokens
     .repeat .tcount({condition})
         .if xmatchToken {(}
-            .if bracketLevel < 0
-                ___error "Mismatched parenthesis."
-            .endif
             bracketLevel .set bracketLevel + 1
         .elseif xmatchToken {)}
             bracketLevel .set bracketLevel - 1
             conditionTokenCount .set currentTokenNumber + 1
+        .endif
+        .if bracketLevel < 0
+            ___error "Mismatched parenthesis."
         .endif
         nextToken
     .endrepeat
@@ -1818,9 +1818,17 @@
 ; C-style syntax for loop
 ;
 ; Parameters:
+;   -  ( init, condition, increment )
 ;
-;  ( init, condition, increment )
+; Requires brackets around a comma separated list of init, condition and increment
+; Values for <init> and <increment> can be any amount of instructions separated by ':'
+; <condition> can be anything that follows conditional expression syntax for IF.
 ;
+; Code for <init> will always be executed. If any value is passed for <strict> the 
+; loop will only be executed after <condition> is checked. If <strict> is not used,
+; the loop will always be executed at least once. If it is clear the loop will be 
+; executed at least once, do not use strict - it avoids the generation of a JMP command.
+; 
 
 .macro for init, condition, increment, strict
 
@@ -1842,10 +1850,9 @@
     .define COND() ( condition )
     ; --------------------------------------------------------------------------------------------
     
-    ; execute the INIT, outside of the loop
+    ; execute the INIT, before the loop
     ___evaluateStatementList {INIT}
     
-    ; create label:
     .ifnblank strict
         jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER))
     .endif
@@ -1864,7 +1871,13 @@
    
 .endmacro
 
-.macro next knownFlagStatus
+; --------------------------------------------------------------------------------------------
+; Function next
+; End of a for loop
+; Outputs increment and condition code for corresponding FOR macro
+
+
+.macro next
     .local FOR_STATEMENT_COUNTER
     stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
     .if FOR_STATEMENT_COUNTER < 0
