@@ -289,6 +289,7 @@
     BREAK_STATEMENT_COUNT               .set 0  ; break statement counter - incremented after break label created
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
+    FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
     IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
@@ -1260,8 +1261,8 @@
             ; see if we need a label here:
             .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined) index
                 .if tokenPositionForBranchLabel{i} = currentTokenNumber
-                    .ifndef .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} ))
-                        .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, tokenPositionForBranchLabel{i} )):
+                    .ifndef .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber ))
+                        .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber )):
                     .endif
                 .endif
             .endrepeat
@@ -1429,7 +1430,7 @@
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
             ; if destinationLabel is defined it means this is a branch to a lower address
             .ifdef destinationLabel
-                .define longJumpAssert Label - destinationLabel > 128
+                .define longJumpAssert longJumpLabel - destinationLabel > 128
             .else ; a branch to a higher address:
                 .ifndef firstBranchToLongJump
                     firstBranchToLongJump = longJumpLabel
@@ -1756,7 +1757,8 @@
     .local whileDoLoop
     stackPeek "DO_WHILE_LOOP_STATEMENT_STACK", doWhileLoop
     stackPeek "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", whileDoLoop
-    .if doWhileLoop < 0 && whileDoLoop < 0
+    stackPeek "FOR_STATEMENT_STACK", forLoop
+    .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0
         ___error "No loop for 'break'"
     .endif
 .endmacro
@@ -1817,16 +1819,66 @@
 ;
 ; Parameters:
 ;
-;  ( init; condition; increment )
+;  ( init, condition, increment )
 ;
 
-.macro for condition
+.macro for init, condition, increment, strict
 
-
+    ; --------------------------------------------------------------------------------------------
+    ; error checks and defines:
+    .if .blank({init}) || .blank({condition}) || .blank({increment})
+        ___error "Error in statement."
+    .endif
+    .if .xmatch( .left(1, {init}), {(} )
+        .define INIT () .mid(1, .tcount({init}) - 1, {init})
+    .else
+        ___error "'(' expected."
+    .endif
+    .if .xmatch( .right(1, {increment}), {)} )
+        .define INCR () .left(.tcount({increment}) - 1, {increment})
+    .else
+        ___error "')' expected."
+    .endif
+    .define COND() ( condition )
+    ; --------------------------------------------------------------------------------------------
+    
+    ; execute the INIT, outside of the loop
+    ___evaluateStatementList {INIT}
+    
+    ; create label:
+    .ifnblank strict
+        jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER))
+    .endif
+    .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER)):
+    
+    stackPush "FOR_STATEMENT_STACK", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER
+    FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER + 1
+    
+    pushTokenList "FOR_STATEMENT_CONDITION", {COND}
+    pushTokenList "FOR_STATEMENT_INCREMENT", {INCR}
+    
+    ; --------------------------------------------------------------------------------------------
+    .undefine INCR
+    .undefine INIT
+    .undefine COND
+   
 .endmacro
 
-.macro next
-
+.macro next knownFlagStatus
+    .local FOR_STATEMENT_COUNTER
+    stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
+    .if FOR_STATEMENT_COUNTER < 0
+        ___error "'next' without 'for'."
+    .endif
+    popTokenList "FOR_STATEMENT_INCREMENT"
+    ___evaluateStatementList {poppedTokenList}
+    
+    .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
+    popTokenList "FOR_STATEMENT_CONDITION"
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
+    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }
+    FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
+    ___generateBreakLabel
 .endmacro
 
 
