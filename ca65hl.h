@@ -1137,8 +1137,6 @@
     .local conditionTokenCount       ;  save token count for condition only (could be goto/break statement after)
     .local gotoUserLabel             ;  flag: if 'goto' found, branch to label passed in <condition>
     .local gotoBreakLabel            ;  flag: branch to break label to exit loop
-    .local foundAND                  ;  flag: found an && when scanning ahead while considering if bracket set is negated
-    .local foundOR                   ;  flag: found an || when scanning ahead while considering if bracket set is negated
     .local foundTokenPosition        ;  save token position of valid && or || tokens when performing look-ahead evaluating correct branch
     .local foundOR_AND               ;  flag: matched an AND or OR when scanning ahead with ___xmatchSpecial
     .local scanAheadBracketLevel     ;  bracket level we are on when scanning ahead
@@ -1146,6 +1144,8 @@
     .local scanAheadNegateBrackets   ;  negate status for brackets when scanning ahead
     .local statementStartPos         ;  token position for start of found statement
     .local statementTokenCount       ;  token count for found statement
+    .local foundAND                  ;  flag: found an && when scanning ahead while considering if bracket set is negated
+    .local foundOR                   ;  flag: found an || when scanning ahead while considering if bracket set is negated
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
@@ -1154,10 +1154,8 @@
     conditionTokenCount     .set 0
     gotoUserLabel           .set 0
     gotoBreakLabel          .set 0
-    foundAND                .set 0
-    foundOR                 .set 0
     
-    ; these values are initialized later:
+    ; these values are initialized before use:
     ; foundTokenPosition      .set 0
     ; foundOR_AND             .set 0
     ; scanAheadBracketLevel   .set 0
@@ -1165,6 +1163,8 @@
     ; scanAheadNegateBrackets .set 0
     ; statementStartPos       .set 0
     ; statementTokenCount     .set 0
+    ; foundAND                .set 0
+    ; foundOR                 .set 0
     
     ; array for label locations: (uses global to reuse ident)
     .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
@@ -1338,7 +1338,7 @@
                         
                     ; Branch to any '||' in the branch's bracket level or lower. ie ( scanAheadBracketLevel = lowestBracketLevel )
                     ; When negated, '||' (an inverted '&&') must be on a lower bracket level to maintain AND precedence.
-                    .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || (!negateBracketSet) )
+                    .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || (!scanAheadNegateBrackets) )
                         ___xmatchSpecial {||}, foundOR_AND, scanAheadNegateBrackets
                         .if foundOR_AND
                             foundTokenPosition .set currentTokenNumber
@@ -1374,7 +1374,7 @@
                         ; scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel )
                         ; When negated, a negated '||' will also match, but in this case:
                         ; Branch to this bracket level or lower to maintain AND precedence.
-                        .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || negateBracketSet )
+                        .elseif scanAheadBracketLevel = lowestBracketLevel && ( lowestBracketLevel < bracketLevel || scanAheadNegateBrackets )
                             ___xmatchSpecial {&&}, foundOR_AND, scanAheadNegateBrackets
                             .if foundOR_AND
                                 foundTokenPosition .set currentTokenNumber
@@ -1429,14 +1429,16 @@
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
             ; if destinationLabel is defined it means this is a branch to a lower address
             .ifdef destinationLabel
-                .assert longJumpLabel - destinationLabel > 128, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
+                .define longJumpAssert Label - destinationLabel > 128
             .else ; a branch to a higher address:
                 .ifndef firstBranchToLongJump
                     firstBranchToLongJump = longJumpLabel
                 .endif
                 ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
-                .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
+                .define longJumpAssert destinationLabel - firstBranchToLongJump - 3 > 127
             .endif
+            .assert longJumpAssert, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
+            .undefine longJumpAssert
         .endif
     .endif
     
@@ -1809,5 +1811,24 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+; Function: for
+;
+; C-style syntax for loop
+;
+; Parameters:
+;
+;  ( init; condition; increment )
+;
+
+.macro for condition
+
+
+.endmacro
+
+.macro next
+
+.endmacro
+
+
 
 .endif
