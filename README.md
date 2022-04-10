@@ -22,4 +22,4 @@ somewhere the ca65 assembler can find them.
 
 Please see manual.md entries for more information.
 
-Please see https://gitlab.com/ca65/ca65hl for the most recent code, as thie github repo may not be updated.
+Please see https://gitlab.com/ca65/ca65hl for the most recent code, as the github repo may not be updated.

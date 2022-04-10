@@ -20,8 +20,7 @@
 ; 
 ; This is a recreation of ca65 macros to allow for some high-level like structured code for branches and loops.
 ; This code started (rewritten) around Feb 2022
-
-; --------------------------------------------------------------------------------------------
+;
 ; This file is only macro code, intended to add functionality. No memory is used and no
 ; supporting 6502 code needed.
 ;
@@ -29,20 +28,20 @@
 ; 
 ; Macros for use outside of this file:
 ;
-; setBranch
-; setLongBranch
-; mb
-; if
-; else
-; elseif
-; endif
-; do
-; while
-; repeat
-; until
-; while <> do
-; endwhile
-; break
+; > setBranch
+; > setLongBranch
+; > mb
+; > if
+; > else
+; > elseif
+; > endif
+; > do
+; > while
+; > repeat
+; > until
+; > while <> do
+; > endwhile
+; > break
 
 .ifndef ::_CA65HL_H_
 ::_CA65HL_H_ = 1
@@ -91,6 +90,7 @@
 ;   tok - Token to find.
 ;   position - Passed identifier to store found position in.
 ;              Should be initialized to zero to search the entire token list.
+;
 ; Note:
 ; It won't find the token in the very first (0) position!
 ; This macro is defined elsewhere in my source, so check if defined first.
@@ -109,7 +109,7 @@
 .endif
 
 ; --------------------------------------------------------------------------------------------
-; Function: ___error message
+; Function: ___error
 ;
 ; Parameters:
 ;
@@ -124,19 +124,28 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: branchOnGreater label, branchOnLessOrEqual label
+; Function: branchOnGreater
 ;
 ; Parameters:
 ;
 ;   label - Label to branch to.
 ;
-;   Simulate a branch for 'G' flag: greater' and 'less or equal'
+;   Simulate a branch for 'G' flag set: 'greater'
 
 .macro branchOnGreater label
     beq :+
     bcs label
     :
 .endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: branchOnLessOrEqual
+;
+; Parameters:
+;
+;   label - Label to branch to.
+;
+;   Simulate a branch for 'G' flag clear: 'less or equal'
 
 .macro branchOnLessOrEqual label
     beq label
@@ -210,8 +219,8 @@
 ;
 ;   branch - Set flag and status for next invocation of <___Branch>
 ;
-; Define both branch flag and flag status for next branch. Also flag that 
-; they are set.
+; Define both branch flag and flag status for next branch. Also set 
+; ___branchSet::branchDefined flag that they are set. Used internally with no error checking.
 
 .macro ___setBranch branch
     ___branchSet::branchDefined .set 1
@@ -226,8 +235,8 @@
 ;
 ;   branch - Set flag and status for next invocation of <___Branch>
 ;
-; Define both branch flag and flag status for next branch. Also flag that they are set.
-; Set the flag to be tested for next branch output, but ignore if branch is already defined.
+; Define both branch flag and flag status for next branch. Also set ___branchSet::branchDefined 
+; flag that they are set. Ignore if branch is already defined.
 ; This allows overriding user macro calls to setBranch with inline branch definition via '==', '!='
 ; Does some error checking for the user. 
 
@@ -282,7 +291,7 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; symbols to track some values for 'if' macro, loops and break
+; symbols to track some values for if, loops and break
 
 .scope FLOW_CONTROL_VALUES
     IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
@@ -298,8 +307,16 @@
 .endscope
 
 ; --------------------------------------------------------------------------------------------
-; set the flag for long jumps
-; TODO.. warnings for unnecessary long branches 
+; Function: setLongBranch
+;
+; Parameters:
+;
+;   l - long branch setting: 'on' or '+' to turn on, 'off' or '-' to turn off
+;   v - long branch warnings: 'on' or '+' to turn on, 'off' or '-' to turn off
+;
+; If long branch turned on, JMP will be output to branch to a user label, break, or endif.
+; If warnings turned on an .assert will output a warning for branches that could have
+; been reached without a JMP instruction.
 
 .macro setLongBranch l, v
     .if .xmatch(l, on) || .xmatch(l, +)
@@ -326,24 +343,23 @@
 ; Parameters:
 ;
 ;   instr - CPU instruction to output.
-;
 ;   op - Operand for instruction.
 ;
-; Look for '[]' set and allow as an array, possibly with x or y indexed:
+;   Look for '[]' set and allow as an array, possibly with x or y indexed:
 ;
-; This macro will output the instruction in passed in instr but it will 
-; process the operand, allowing an index defined by square braces: '[]'.
-; In the square braces can be any constant expression, which will be 
-; extracted and added onto the end of the operand as in normal assembly.
+;   This macro will output the instruction in passed in instr but it will 
+;   process the operand, allowing an index defined by square braces: '[]'.
+;   In the square braces can be any constant expression, which will be 
+;   extracted and added onto the end of the operand as in normal assembly.
 ;
-; Example:
-;   lda foo[ 4 ] ; becomes: lda foo+4
+;   Example:
+; > lda foo[ 4 ] ; becomes: lda foo+4
 ;
 ;   As well, the index can contain 'x' or 'y', to indicate to use the 6502's
 ;   indexed addressing modes.
 ;
-; Example:
-;   lda foo[ 4 + x ] ; becomes: lda foo+4, x
+;   Example:
+; > lda foo[ 4 + x ] ; becomes: lda foo+4, x
 
 .macro ___arraySyntax instr, op
 
@@ -492,6 +508,111 @@
         ___compare::position .set pos
     .endif
 
+.endmacro
+
+; --------------------------------------------------------------------------------------------;
+; called by IF when compare operator found in a statement
+; ___compare::operator and ___compare::position must be set first
+; 
+.macro ___doCompare exp
+
+    .local left
+    .local right
+    .define _LEFT ()  .mid (0, ___compare::position, {exp})
+    .define _RIGHT () .mid (___compare::position + 1, .tcount({exp}) - ___compare::position - 1, {exp})
+    
+    ; first look for a register 
+    ; check if register on the right side. Left is always the register.
+    left .set 0
+    .if .xmatch (_RIGHT, a)
+        left .set ___math::REGA
+    .elseif .xmatch (_RIGHT, x)
+        left .set ___math::REGX
+    .elseif .xmatch (_RIGHT, y)
+        left .set ___math::REGY
+    .endif
+
+    ; if we found a register on the right side, pretend it is on the left by switching the compare and the defines
+    .if left        
+        .if ___compare::operator = ___compare::GREATER
+            ___compare::operator .set ___compare::LESS
+        .elseif ___compare::operator = ___compare::GREATEREQUAL
+            ___compare::operator .set ___compare::LESSEQUAL
+        .endif
+        ; switch sides
+        .define _TEMPRIGHT _RIGHT
+        .undefine _RIGHT
+        .define _RIGHT _LEFT
+        .undefine _LEFT
+        .define _LEFT _TEMPRIGHT
+        .undefine _TEMPRIGHT
+    .else
+        .if .xmatch (_LEFT, a)
+            left .set ___math::REGA
+        .elseif .xmatch (_LEFT, x)
+            left .set ___math::REGX
+        .elseif .xmatch (_LEFT, y)
+            left .set ___math::REGY
+        .endif
+    .endif
+    ; no registers found, so first we will load a register, or eval an expression
+    .if !left
+        .define _LEFT1 .left (1, {_LEFT})
+        .if .match( _LEFT1, abc) 
+            .if .ismnemonic(_LEFT1)
+                ___arraySyntax _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
+                .if .xmatch(_LEFT1,lda)
+                    left .set ___math::REGA
+                .elseif .xmatch(_LEFT1,ldx)
+                    left .set ___math::REGX
+                .elseif .xmatch(_LEFT1,ldy)
+                    left .set ___math::REGY
+                .elseif .xmatch(_LEFT1,inx)
+                    left .set ___math::REGX
+                .elseif .xmatch(_LEFT1,dex)
+                    left .set ___math::REGX
+                .elseif .xmatch(_LEFT1,iny)
+                    left .set ___math::REGY
+                .elseif .xmatch(_LEFT1,dey)
+                    left .set ___math::REGY
+                .endif
+            .endif
+        .endif
+        .if !left
+            ___evalMathOp {_LEFT}
+            left .set ___math::regFound
+        .endif
+        .undefine _LEFT1
+    .endif
+    
+    .if !left
+       ___error "Unknown register to use in comparison macro."
+       .exitmacro
+    .endif
+    
+    .if left = ___math::REGA
+        ___arraySyntax cmp, {_RIGHT}
+    .elseif left = ___math::REGX
+        ___arraySyntax cpx, {_RIGHT}
+    .elseif left = ___math::REGY
+        ___arraySyntax cpy, {_RIGHT}
+    .endif
+    .if ___compare::operator     = ___compare::GREATER
+        ___setBranch G set
+    .elseif ___compare::operator = ___compare::LESS
+        ___setBranch C clear
+    .elseif ___compare::operator = ___compare::EQUAL
+        ___setBranch Z set
+    .elseif ___compare::operator = ___compare::GREATEREQUAL
+        ___setBranch C set
+    .elseif ___compare::operator = ___compare::LESSEQUAL
+        ___setBranch G clear
+    .elseif ___compare::operator = ___compare::NEQUAL
+        ___setBranch Z clear
+    .endif
+    
+    .undefine _LEFT 
+    .undefine _RIGHT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -708,122 +829,16 @@
     
 .endmacro
 
-; --------------------------------------------------------------------------------------------;
-; called by IF when compare operator found in a statement
-; ___compare::operator and ___compare::position must be set first
-; 
-.macro ___doCompare exp
-
-    .local left
-    .local right
-    .define _LEFT ()  .mid (0, ___compare::position, {exp})
-    .define _RIGHT () .mid (___compare::position + 1, .tcount({exp}) - ___compare::position - 1, {exp})
-    
-    ; first look for a register 
-    ; check if register on the right side. Left is always the register.
-    left .set 0
-    .if .xmatch (_RIGHT, a)
-        left .set ___math::REGA
-    .elseif .xmatch (_RIGHT, x)
-        left .set ___math::REGX
-    .elseif .xmatch (_RIGHT, y)
-        left .set ___math::REGY
-    .endif
-
-    ; if we found a register on the right side, pretend it is on the left by switching the compare and the defines
-    .if left        
-        .if ___compare::operator = ___compare::GREATER
-            ___compare::operator .set ___compare::LESS
-        .elseif ___compare::operator = ___compare::GREATEREQUAL
-            ___compare::operator .set ___compare::LESSEQUAL
-        .endif
-        ; switch sides
-        .define _TEMPRIGHT _RIGHT
-        .undefine _RIGHT
-        .define _RIGHT _LEFT
-        .undefine _LEFT
-        .define _LEFT _TEMPRIGHT
-        .undefine _TEMPRIGHT
-    .else
-        .if .xmatch (_LEFT, a)
-            left .set ___math::REGA
-        .elseif .xmatch (_LEFT, x)
-            left .set ___math::REGX
-        .elseif .xmatch (_LEFT, y)
-            left .set ___math::REGY
-        .endif
-    .endif
-    ; no registers found, so first we will load a register, or eval an expression
-    .if !left
-        .define _LEFT1 .left (1, {_LEFT})
-        .if .match( _LEFT1, abc) 
-            .if .ismnemonic(_LEFT1)
-                ___arraySyntax _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
-                .if .xmatch(_LEFT1,lda)
-                    left .set ___math::REGA
-                .elseif .xmatch(_LEFT1,ldx)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,ldy)
-                    left .set ___math::REGY
-                .elseif .xmatch(_LEFT1,inx)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,dex)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,iny)
-                    left .set ___math::REGY
-                .elseif .xmatch(_LEFT1,dey)
-                    left .set ___math::REGY
-                .endif
-            .endif
-        .endif
-        .if !left
-            ___evalMathOp {_LEFT}
-            left .set ___math::regFound
-        .endif
-        .undefine _LEFT1
-    .endif
-    
-    .if !left
-       ___error "Unknown register to use in comparison macro."
-       .exitmacro
-    .endif
-    
-    .if left = ___math::REGA
-        ___arraySyntax cmp, {_RIGHT}
-    .elseif left = ___math::REGX
-        ___arraySyntax cpx, {_RIGHT}
-    .elseif left = ___math::REGY
-        ___arraySyntax cpy, {_RIGHT}
-    .endif
-    .if ___compare::operator     = ___compare::GREATER
-        ___setBranch G set
-    .elseif ___compare::operator = ___compare::LESS
-        ___setBranch C clear
-    .elseif ___compare::operator = ___compare::EQUAL
-        ___setBranch Z set
-    .elseif ___compare::operator = ___compare::GREATEREQUAL
-        ___setBranch C set
-    .elseif ___compare::operator = ___compare::LESSEQUAL
-        ___setBranch G clear
-    .elseif ___compare::operator = ___compare::NEQUAL
-        ___setBranch Z clear
-    .endif
-    
-    .undefine _LEFT 
-    .undefine _RIGHT
-.endmacro
-
 ; --------------------------------------------------------------------------------------------
 ; Function: mb register, exp
-; Move Byte
 ;
 ; Parameters:
-;       register - Optional - register to use 
-;       exp - expression to process
+;    register - Optional - register to use 
+;    exp - expression to process
 ;
-; Move a byte, possibly through some other instructions for basic add/sub or bit-wise operations.
-; Can accept one parameter. If no register passed, register to use will be searched for, 
-; or register A will be used by default. (The macro will adjust arguments if exp is empty).
+;   Move a byte, possibly through some other instructions for basic add/sub or bit-wise operations.
+;   Can accept one parameter. If no register passed, register to use will be searched for, 
+;   or register A will be used by default. (The macro will adjust arguments if exp is empty).
 
 .macro mb register, exp
 
@@ -943,37 +958,51 @@
     .else
         .define S() statement
     .endif
+    
     printTokenListDebug {Statement: S}
-    ; -------------------------------------
-    ; first: special case - is a register
-    .if .xmatch( .left (1,{S}), a) || .xmatch( .left (1,{S}), x) || .xmatch( .left (1,{S}), y)
-        ___findCompareOperator {S}
-        .if ___compare::found
-            ___doCompare {S}
-        .else
-            ___evalMathOp {S}
-        .endif
-    .else 
-        ; if it is a macro, just call the macro:
-        .if .definedmacro ( .left(1,{S}))
-            printTokenListDebug {Macro: S}
-            .left (1,{S})  .mid (1, .tcount({S}) - 1, {S} ) 
-        .else
-            ; first check for operators that indicate comparison : > < <> >= <=
+    
+    ; ___findToken won't find a leading ':', check if there is a leading colon, and set colonPos to -1 to indicate this.
+    ; (allows for blank statements)
+    .if  .xmatch( { .left( 1, {S} ) } , {:} ) || .xmatch( { .left( 1, {S} ) } , {::} )
+        colonPos .set -1
+    .endif
+    
+    .if colonPos <> -1 && .tcount({S})
+        ; -------------------------------------
+        ; first: special case - is a register
+        .if .xmatch( .left (1,{S}), a) || .xmatch( .left (1,{S}), x) || .xmatch( .left (1,{S}), y)
             ___findCompareOperator {S}
             .if ___compare::found
                 ___doCompare {S}
-            .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
-                ___arraySyntax .left (1,{S}), {.mid (1, .tcount({S}) - 1, {S} )}
             .else
                 ___evalMathOp {S}
             .endif
+        .else 
+            ; if it is a macro, just call the macro:
+            .if .definedmacro ( .left(1,{S}))
+                printTokenListDebug {Macro: S}
+                .left (1,{S})  .mid (1, .tcount({S}) - 1, {S} ) 
+            .else
+                ; first check for operators that indicate comparison : > < <> >= <=
+                ___findCompareOperator {S}
+                .if ___compare::found
+                    ___doCompare {S}
+                .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
+                    ___arraySyntax .left (1,{S}), {.mid (1, .tcount({S}) - 1, {S} )}
+                .else
+                    ___evalMathOp {S}
+                .endif
+            .endif
         .endif
+        ; -------------------------------------
     .endif
-    ; -------------------------------------
+    
     .undefine S
       ; Repeat with next if there was a colon found:
     .if colonPos
+        .if colonPos = -1
+            colonPos .set 0
+        .endif
         ___evaluateStatementList { .mid ( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} ) }
     .endif
 .endmacro
@@ -1156,7 +1185,7 @@
     gotoUserLabel           .set 0
     gotoBreakLabel          .set 0
     
-    ; these values are initialized before use:
+    ; these are initialized before use:
     ; foundTokenPosition      .set 0
     ; foundOR_AND             .set 0
     ; scanAheadBracketLevel   .set 0
@@ -1472,7 +1501,7 @@
 ;
 ;   condition - Conditional expression to evaluate.
 ;
-;   knownFlagStatus - Optional - if a flag is known to be in a state when the else
+;   knownFlagStatus - Optional - if a flag is known to be in a state when the elseif
 ;                     is encountered, branch to the end if using this flag as a branch 
 ;                     always, using the syntax for <setBranch>
 ;
@@ -1485,6 +1514,10 @@
     stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
     .if IF_STATEMENT_COUNT < 0 
         ___error "'elseif' without 'if'"
+    .endif
+    
+    .ifdef .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT ))
+        ___error "No 'elseif' after 'else'."
     .endif
     
     ; jump to endif
@@ -1755,6 +1788,7 @@
 .macro ___verifyBreakInsideLoop
     .local doWhileLoop
     .local whileDoLoop
+    .local forLoop
     stackPeek "DO_WHILE_LOOP_STATEMENT_STACK", doWhileLoop
     stackPeek "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", whileDoLoop
     stackPeek "FOR_STATEMENT_STACK", forLoop
@@ -1818,17 +1852,17 @@
 ; C-style syntax for loop
 ;
 ; Parameters:
-;   -  ( init, condition, increment )
+;   -  ( init, condition, increment ), strict
 ;
-; Requires brackets around a comma separated list of init, condition and increment
-; Values for <init> and <increment> can be any amount of instructions separated by ':'
-; <condition> can be anything that follows conditional expression syntax for IF.
+;   Requires brackets around a comma separated list of init, condition and increment
+;   Values for <init> and <increment> can be any amount of instructions separated by ':'
+;   and are both optional. The <condition> can be anything that follows conditional expression 
+;   syntax for IF.
 ;
-; Code for <init> will always be executed. If any value is passed for <strict> the 
-; loop will only be executed after <condition> is checked. If <strict> is not used,
-; the loop will always be executed at least once. If it is clear the loop will be 
-; executed at least once, do not use strict - it avoids the generation of a JMP command.
-; 
+;   Code for <init> will always be executed. If any value is passed for <strict> the 
+;   loop will only be executed after <condition> is checked. If <strict> is not used,
+;   the loop will always be executed at least once. If it is clear the loop will be 
+;   executed at least once, do not use strict - it avoids the generation of a JMP command.
 
 .macro for init, condition, increment, strict
 
@@ -1873,9 +1907,10 @@
 
 ; --------------------------------------------------------------------------------------------
 ; Function next
-; End of a for loop
-; Outputs increment and condition code for corresponding FOR macro
-
+;
+;   Parameters - none
+;
+;   End of a for loop. Outputs increment and condition code for corresponding FOR macro.
 
 .macro next
     .local FOR_STATEMENT_COUNTER
@@ -1883,9 +1918,10 @@
     .if FOR_STATEMENT_COUNTER < 0
         ___error "'next' without 'for'."
     .endif
+    ; if FOR_STATEMENT_STACK is valid, then popTokenList should be too:
     popTokenList "FOR_STATEMENT_INCREMENT"
     ___evaluateStatementList {poppedTokenList}
-    
+    ; jmp here on strict:
     .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
