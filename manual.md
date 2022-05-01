@@ -512,6 +512,7 @@ executed after <condition> is checked. If <strict> is not used, the loop will al
 If it is intended that the loop will be executed at least once, do not use strict - it avoids the generation of a JMP command.
 
 Example:
+
     for ( ldy #15, !negative, dey )
        lda (palPtr),y
        sta backgroundPalette, y
