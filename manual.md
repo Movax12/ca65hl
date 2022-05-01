@@ -500,7 +500,7 @@ A **JMP** instruction is used to loop at **endwhile**.
 A C-style for loop
 
 Usage:
-`for ( <init>, <condition>, <incremen> ), strict`
+`for ( <init>, <condition>, <increment> ), strict`
 
 This macro requires brackets around a comma separated list of for init, condition and increment valuies. 
 Values for <init> and <increment> can be any amount of instructions separated by ':' and are both optional. 
