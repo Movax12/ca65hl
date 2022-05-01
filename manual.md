@@ -274,7 +274,7 @@ Or:
 
 
 There is also a feature to indicate at link if the long branch was not
-needed: (Not implemented yet.)
+needed:
 
     setLongBranch +, +    ; if a code block is less than 127 bytes, the linker will say that a long branch is not needed here
     setLongBranch +, -    ; don't warn about code blocks less than 127 bytes
@@ -494,3 +494,25 @@ A **JMP** instruction is used to loop at **endwhile**.
         lda fromhere, x
         sta puthere, x
     endwhile
+
+#### For Loop
+
+A C-style for loop
+
+Usage:
+`for ( <init>, <condition>, <incremen> ), strict`
+
+This macro requires brackets around a comma separated list of for init, condition and increment valuies. 
+Values for <init> and <increment> can be any amount of instructions separated by ':' and are both optional. 
+The <condition> can be anything that follows conditional expression syntax for IF. The end of the code block for the 
+loop is defined by `next`
+
+Note: Code for <init> will always be executed. If any value is passed for <strict> the loop will only be 
+executed after <condition> is checked. If <strict> is not used, the loop will always be executed at least once. 
+If it is intended that the loop will be executed at least once, do not use strict - it avoids the generation of a JMP command.
+
+Example:
+    for ( ldy #15, !negative, dey )
+       lda (palPtr),y
+       sta backgroundPalette, y
+    next
