@@ -2011,7 +2011,8 @@
         .define INDEX_REG_FOR_TABLE x
     .else ; no compare, just branch on lookup value in reg. x or y
         .if .xmatch( reg, x )
-            .define INDEX_REG_FOR_TABLE "none"
+            .define INDEX_REG_FOR_TABLE x
+            .define SWITCH_INFO_REG "none"
         .elseif  .xmatch( reg, a )
             tax
             .define INDEX_REG_FOR_TABLE x
@@ -2132,7 +2133,8 @@
 ; End the switch code block. This macro will:
 ; - check if a used 'goto' option is valid, or if it should have been used.
 ; - define the label for exit if there are no matches to the case constants and no default case.
-; - define the tables (optionally, in the segment set by setSwitchStatementDataSeg).
+; - define the tables (optionally, in the segment set by setSwitchStatementDataSeg)
+; - define label for 'break'
 
 .macro endswitch
     .local SWITCH_STATEMENT_COUNTER
