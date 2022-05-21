@@ -1524,7 +1524,7 @@
 ;   See Also:
 ;   <setBranch>, <endif>, <if>, <else>
 
-.macro elseif condition, knownFlagStatus
+.macro elseif condition, knownFlagStatus, branchtype
 
     .local IF_STATEMENT_COUNT
     stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
@@ -1561,7 +1561,7 @@
     ; negate statement to GOTO the next ELSEIF/ELSE/ENDIF on failed condition 
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { condition goto .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )) }
+    if { condition goto .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     
@@ -1682,7 +1682,7 @@
 ;   See Also:
 ;   <do>, <repeat>, <until>
 
-.macro while condition
+.macro while condition, branchtype
     .if .xmatch(.right(1, {condition}), do) ; if match 'do' at end this is a while..do..endwhile statement
         while_do {.mid(0, .tcount({condition}) - 1, {condition}) }
     .else
@@ -1693,7 +1693,7 @@
             ___error "'while' without 'do'"
         .endif
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-        if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
+        if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
         ___generateBreakLabel
     .endif
@@ -1722,7 +1722,7 @@
 ;   See Also:
 ;   <do>, <while>, <repeat>
 
-.macro until condition
+.macro until condition, branchtype
     .local DO_WHILE_STATEMENT_COUNT
     stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
     ; check if all okay
@@ -1731,7 +1731,7 @@
     .endif
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }
+    if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     ___generateBreakLabel
@@ -1750,12 +1750,12 @@
 ;   See Also:
 ;   <do>, <while>, <repeat>, <until>
 
-.macro while_do condition
+.macro while_do condition, branchtype
     stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}
+    if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}, branchtype
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT + 1      ; increment while-do counter
@@ -1930,7 +1930,7 @@
 ;
 ;   End of a for loop. Outputs increment and condition code for corresponding FOR macro.
 
-.macro next useLongJump
+.macro next branchtype
     .local FOR_STATEMENT_COUNTER
     stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
     .if FOR_STATEMENT_COUNTER < 0
@@ -1943,13 +1943,18 @@
     .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, useLongJump
+    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     ___generateBreakLabel
 .endmacro
 
-; --------------------------------------------------------------------------------------------
+; --------------------------------------------------------------------------------------------; --------------------------------------------------------------------------------------------
+; Function setSwitchStatementDataSeg
 ;
+;   Parameters -
+;       string - string representing a valid segment for the linker.
+;
+; Set the segment for the table data for the 'switch' statement.
 
 .macro setSwitchStatementDataSeg string
 
@@ -2001,8 +2006,8 @@
             .define SWITCH_INFO_REG "a"
         .else 
             lda reg
-            .define SWITCH_INFO_REG "a"
         .endif
+        .define SWITCH_INFO_REG "x"
         .define INDEX_REG_FOR_TABLE x
     .else ; no compare, just branch on lookup value in reg. x or y
         .if .xmatch( reg, x )
@@ -2010,18 +2015,18 @@
         .elseif  .xmatch( reg, a )
             tax
             .define INDEX_REG_FOR_TABLE x
-            .define SWITCH_INFO_REG "x"
+            .define SWITCH_INFO_REG "X"
         .elseif  .xmatch( reg, y )
             .define INDEX_REG_FOR_TABLE y
             .define SWITCH_INFO_REG "none"
         .else 
             ldx reg
             .define INDEX_REG_FOR_TABLE x
-            .define SWITCH_INFO_REG "x"
+            .define SWITCH_INFO_REG "X"
         .endif
     .endif
     
-    .out .sprintf( "Info: Switch: Register %s loaded/changed for switch.", SWITCH_INFO_REG)
+    .warning .sprintf( "INFO: Switch: Register A value changed for switch. Register %s loaded/changed to index data for switch.", SWITCH_INFO_REG)
     
     .if !gotoMode
         .local loop, found
@@ -2048,9 +2053,18 @@
     .undefine SWITCH_INFO_REG
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+; Function case
+;
+;   Parameters
+;       constant - immediate constant, eg #1234, or 'default' to define the default case.
+; 
+; The parameter must be a constant at assembly time. If it is 'default' no more case macros can be defined 
+; for this switch.
+
 .macro case constant
 
-    ; get case statment number from the stack:
+    ; get case statement number from the stack:
     .local SWITCH_STATEMENT_COUNTER
     stackPeek "SWITCH_TABLE_STATEMENT_STACK", SWITCH_STATEMENT_COUNTER
     .if SWITCH_STATEMENT_COUNTER < 0
@@ -2109,6 +2123,17 @@
     .undefine thisSwitchCaseConstant
 .endmacro
 
+; --------------------------------------------------------------------------------------------
+; Function endswitch
+;
+;   Parameters
+;       none
+; 
+; End the switch code block. This macro will:
+; - check if a used 'goto' option is valid, or if it should have been used.
+; - define the label for exit if there are no matches to the case constants and no default case.
+; - define the tables (optionally, in the segment set by setSwitchStatementDataSeg).
+
 .macro endswitch
     .local SWITCH_STATEMENT_COUNTER
     .local exit
@@ -2136,7 +2161,7 @@
         .pushseg
         .segment SWITCH_STATEMENT_DATA_SEG_STRING            
     .else
-        ; Jump over tables if they are in the same segment. It would be better to define this table at the beginning
+        ; Jump over tables if in the same segment. It could be better to define this table at the beginning
         ; in the switch macro, but I don't see how to get ca65 to do this.
         jmp exit
     .endif
@@ -2177,11 +2202,6 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-
-    
-    
-    
-
 
 
 .endif
