@@ -299,6 +299,8 @@
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
     FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
+    SWITCH_STATEMENT_COUNTER            .set 0  ; switch statement counter
+    SWITCH_STATEMENT_DATA_SEG           .set 0  ; flag: if on, use data segment defined by setSwitchStatementDataSeg
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
     IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
@@ -1112,6 +1114,7 @@
 ; Parameters:
 ;
 ;   condition - Conditional expression to evaluate. Requires surrounding braces.
+;   branchtype - can be 'long' or 'short' to override current setLongBranch settings
 ;
 ; Parenthesis are required around the test condition.
 ; 
@@ -1130,7 +1133,7 @@
 ; (inside a loop) and branch to the next break label. If no 'goto' or 'break', it will branch to 
 ; the next ENDIF (or ELSE, or ELSEIF) on an inverted condition.
 
-.macro if condition
+.macro if condition, branchtype
     
     printTokenListDebug {Branch_Statement: condition}
     ; --------------------------------------------------------------------------------------------
@@ -1157,8 +1160,8 @@
     .endif
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
     
-    .local exitBranchEvaluation      ;  label: branch to this label on failed condition (acts like a pass condition with a code block defined by if..endif)
-    .local longJumpLabel             ;  label: for long jump: branch to this label on a passed condition when long jumps active
+    .local exitBranchEvaluation      ;  label: branch to this label on failed condition (acts like a pass/true condition with a code block defined by if..endif)
+    .local longJumpLabel             ;  label: for long jump: branch to this label on a passed/true condition when long jumps active
     .local firstBranchToLongJump     ;  label: for verifying a long jump is needed: address from the first branch that will use a long jump
     .local negateBracketSet          ;  flag: if a set of terms in brackets to be negated
     .local negateNext                ;  flag: if single branch term to be negated              
@@ -1176,6 +1179,7 @@
     .local statementTokenCount       ;  token count for found statement
     .local foundAND                  ;  flag: found an && when scanning ahead while considering if bracket set is negated
     .local foundOR                   ;  flag: found an || when scanning ahead while considering if bracket set is negated
+    .local useLongJump               ;  flag: set true if macro param. branchtype is 'long' or if omitted set to true if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
@@ -1196,6 +1200,19 @@
     ; foundAND                .set 0
     ; foundOR                 .set 0
     
+    ; figure out long jump:
+    .ifnblank branchtype
+        .if .xmatch( branchtype, long )
+            useLongJump .set 1
+        .elseif .xmatch( branchtype, short )
+            useLongJump .set 0
+        .else
+            ___error "Invalid branch option. Valid is 'long' or 'short'."
+        .endif
+    .else
+        useLongJump .set FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+    .endif
+        
     ; array for label locations: (uses global to reuse ident)
     .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
@@ -1234,7 +1251,7 @@
         .elseif .xmatch( .mid(conditionTokenCount, 1, {condition}), break )
             ___verifyBreakInsideLoop               ; valid break?  
             gotoBreakLabel .set 1
-            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
         .else
             .if FLOW_CONTROL_VALUES::INTERNAL_CALL
                 ___error "Error in expression."
@@ -1251,7 +1268,7 @@
     
     ; If long jump active, invert condition and branch to exitBranchEvaluation to skip the 'jmp destinationLabel'
     ; In this case a 'pass' or 'true' condition (before it is inverted) will use 'jmp' to branch to the label.
-    .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+    .if useLongJump
         negateBracketSet .set !negateBracketSet
         .define conditionPassLabel exitBranchEvaluation
         .define conditionFailLabel longJumpLabel
@@ -1290,8 +1307,8 @@
             ; see if we need a label here:
             .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined) index
                 .if tokenPositionForBranchLabel{i} = currentTokenNumber
-                    .ifndef .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber ))
-                        .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber )):
+                    .ifndef .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber ))
+                        .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber )):
                     .endif
                 .endif
             .endrepeat
@@ -1299,8 +1316,7 @@
             nextToken
         ; --------------------------------------------------------------------------------------------
         .elseif matchToken {abc} || xmatchToken{a} || xmatchToken{x} || xmatchToken{y} || matchToken {::} ; something that could be an identifier, register, or branch setting
-            ; find statementStartPos and statementTokenCount
-            ; find end of statement, but ignore anything in ()
+            ; find statementStartPos and statementTokenCount: find end of statement, but ignore anything in ()
             statementStartPos .set currentTokenNumber
             allowAllTokens
             scanAheadBracketLevel .set 0    ; use as temp
@@ -1333,17 +1349,17 @@
             foundTokenPosition      .set 0
             foundOR_AND             .set 0
             scanAheadBracketLevel   .set bracketLevel
-            lowestBracketLevel      .set bracketLevel
             scanAheadNegateBrackets .set negateBracketSet
             ; skip immediate and repeated closed braces: eg. for 'N set' (marked in quotes): if (( C set || N set')' && V set)
             .repeat conditionTokenCount - currentTokenNumber
             .if (!EOT) && xmatchToken {)}
                 scanAheadBracketLevel .set scanAheadBracketLevel - 1
-                lowestBracketLevel .set scanAheadBracketLevel
                 stackPop "_IF_NEGATE_STACK_", scanAheadNegateBrackets
                 nextToken
             .endif
             .endrepeat
+            ; lowestBracketLevel saves lowest bracket level found when scanning ahead:
+            lowestBracketLevel .set scanAheadBracketLevel
             ; --------------------------------------------------------------------------------------------
             ; Where to branch to depends on if there is an '&&' or '||' following that applies to this branch
             ___xmatchSpecial {&&}, foundAND, scanAheadNegateBrackets ; special token match, considers negated bracket set
@@ -1351,7 +1367,7 @@
                 ; Example: C set && V set || Z set
                 ;  - Pass: C is set: do not branch
                 ;  - Fail: (branch on inverted condition) to next '||' in this bracket level or lower
-                ; If no '||' then overall condition is fail, branch to endif or exit for goto/break on the inverted condition
+                ; If no '||' then overall condition is fail, exit branch evaluation
                 ___invertBranchCondition ; always invert when an AND after this branch
                 nextToken ; skip '&&'
                 .repeat conditionTokenCount - currentTokenNumber
@@ -1386,7 +1402,7 @@
                     ;  - Pass: C is set: branch to next '&&' in this bracket level, or lower
                     ;       NOTE: This is correct for left to right, to allow '&&' to have priority only branch to && on lower bracket level
                     ;  - Fail: do not branch
-                    ;  If no '&&' then overall condition is pass, branch to code block start, or goto/break label for pass condition
+                    ;  If no '&&' then overall condition is pass, branch to label
                     nextToken ; skip '||'
                     .repeat conditionTokenCount - currentTokenNumber
                     .if (!EOT) && (!foundTokenPosition)
@@ -1420,16 +1436,16 @@
             .if foundAND || foundOR
                 .if foundTokenPosition
                     ; branch to next appropriate '&&' or '||' statement:
-                    .define branchToLabel .ident(.sprintf( "IF_STATEMENT_%04X_BRANCH_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition))
+                    .define branchToLabel .ident(.sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition))
                     tokenPositionForBranchLabel{branchLabelCounter} .set foundTokenPosition
                     branchLabelCounter .set branchLabelCounter + 1
                 .else ; found a '||' or '&&' that affects this branch, but no following '&&','||' to branch to:
                     .if foundAND
-                        .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag, e.g.: if ( C set && N set)
+                        .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag, e.g. (for C set branch): if ( C set && N set)
                         
                         ; if long jumps active, save the first branch that uses the long jump
                         ; (only conditionFailLabel will be a branch to the long jump)
-                        .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+                        .if useLongJump
                             .ifndef firstBranchToLongJump
                                 firstBranchToLongJump = * + 2 ; address for end of next branch
                             .endif
@@ -1453,7 +1469,7 @@
     .endrepeat
     
     ; when long jump active, JMP to destinationLabel
-    .if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+    .if useLongJump
         longJumpLabel:
         jmp destinationLabel
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
@@ -1789,11 +1805,13 @@
     .local doWhileLoop
     .local whileDoLoop
     .local forLoop
+    .local switchCount
     stackPeek "DO_WHILE_LOOP_STATEMENT_STACK", doWhileLoop
     stackPeek "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", whileDoLoop
     stackPeek "FOR_STATEMENT_STACK", forLoop
-    .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0
-        ___error "No loop for 'break'"
+    stackPeek "SWITCH_TABLE_STATEMENT_STACK", switchCount
+    .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0 && switchCount < 0
+        ___error "Invalid 'break'."
     .endif
 .endmacro
 
@@ -1811,10 +1829,10 @@
     ___verifyBreakInsideLoop
     .ifnblank knownFlagStatus
         setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
         ___clearBranchSet
     .else
-        jmp .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+        jmp .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
     .endif
     stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
 .endmacro
@@ -1840,7 +1858,7 @@
         .endif
     .elseif _BREAK_STATEMENT_COUNT >= 0
         stackPop "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT
-        .ident( .sprintf( "BREAK_STATEMENT_LABEL_%04X", _BREAK_STATEMENT_COUNT)):
+        .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", _BREAK_STATEMENT_COUNT)):
         ___generateBreakLabel _BREAK_STATEMENT_COUNT
         FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT + 1
     .endif
@@ -1881,7 +1899,7 @@
     .else
         ___error "')' expected."
     .endif
-    .define COND() ( condition )
+    .define COND () ( condition )
     ; --------------------------------------------------------------------------------------------
     
     ; execute the INIT, before the loop
@@ -1912,7 +1930,7 @@
 ;
 ;   End of a for loop. Outputs increment and condition code for corresponding FOR macro.
 
-.macro next
+.macro next useLongJump
     .local FOR_STATEMENT_COUNTER
     stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
     .if FOR_STATEMENT_COUNTER < 0
@@ -1925,10 +1943,244 @@
     .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }
+    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, useLongJump
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     ___generateBreakLabel
 .endmacro
+
+; --------------------------------------------------------------------------------------------
+;
+
+.macro setSwitchStatementDataSeg string
+
+    .if FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG
+        .undefine SWITCH_STATEMENT_DATA_SEG_STRING
+    .endif
+    .define SWITCH_STATEMENT_DATA_SEG_STRING string
+    FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG .set 1
+
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function switch
+;
+;   Parameters -
+;       reg - CPU register or identifier. If parameter is not one of a, x or y, it will be assumed to be an CA65 identifier.
+;       mode - Must be 'goto' or omitted. For 'goto' the case values must be in order starting at zero, and the code to
+;              to look for a matching value will be skipped, and the addresses for the jump table loaded immediately.
+;
+
+; Additional notes:
+; Macro 'switch' works with macros 'case', 'default', 'endswitch' to build a list of constants and corresponding address table to use as a jump table.
+; if setSwitchStatementDataSeg is used first, the data table will be placed in the defined segment and will allow the macro to not have to include a JMP command to skip 
+; the data tables.
+
+.macro switch reg, mode
+
+    .local gotoMode
+    
+    .ifnblank mode
+        .if .xmatch( {mode}, goto )
+            gotoMode = 1
+        .else
+            ___error "Mode should be 'goto' for basic jump table, or omitted for out of order case values."
+        .endif
+    .else
+        gotoMode = 0
+    .endif
+    
+    .if !gotoMode
+        .if .xmatch( reg, a )
+            ;
+            .define SWITCH_INFO_REG "none"
+        .elseif  .xmatch( reg, x )
+            txa
+            .define SWITCH_INFO_REG "a"
+        .elseif  .xmatch( reg, y )
+            tya
+            .define SWITCH_INFO_REG "a"
+        .else 
+            lda reg
+            .define SWITCH_INFO_REG "a"
+        .endif
+        .define INDEX_REG_FOR_TABLE x
+    .else ; no compare, just branch on lookup value in reg. x or y
+        .if .xmatch( reg, x )
+            .define INDEX_REG_FOR_TABLE "none"
+        .elseif  .xmatch( reg, a )
+            tax
+            .define INDEX_REG_FOR_TABLE x
+            .define SWITCH_INFO_REG "x"
+        .elseif  .xmatch( reg, y )
+            .define INDEX_REG_FOR_TABLE y
+            .define SWITCH_INFO_REG "none"
+        .else 
+            ldx reg
+            .define INDEX_REG_FOR_TABLE x
+            .define SWITCH_INFO_REG "x"
+        .endif
+    .endif
+    
+    .out .sprintf( "Info: Switch: Register %s loaded/changed for switch.", SWITCH_INFO_REG)
+    
+    .if !gotoMode
+        .local loop, found
+        ldx #( .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_TOTAL_COUNT", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)) - 1 )
+        loop:
+            cmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
+            beq found
+            dex  
+        bpl loop
+        jmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER))
+        found:
+    .endif
+    
+    lda .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_HIBYTES", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
+    pha
+    lda .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_LOBYTES", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
+    pha
+    rts
+   
+    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)) = gotoMode
+    stackPush "SWITCH_TABLE_STATEMENT_STACK", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER
+    FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER + 1
+    .undefine INDEX_REG_FOR_TABLE
+    .undefine SWITCH_INFO_REG
+.endmacro
+
+.macro case constant
+
+    ; get case statment number from the stack:
+    .local SWITCH_STATEMENT_COUNTER
+    stackPeek "SWITCH_TABLE_STATEMENT_STACK", SWITCH_STATEMENT_COUNTER
+    .if SWITCH_STATEMENT_COUNTER < 0
+        ___error "'case' without 'switch'."
+    .endif
+    
+    ; no more if default has been created:
+    .ifdef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
+        ___error "No more 'case' statements allowed after 'default'."
+    .endif
+
+    ; create the default label if requested and allowed:
+    .if .xmatch( constant, default )
+        .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER))
+            ___error "Default case not valid in 'goto' mode."
+        .endif
+            .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
+        .exitmacro
+    .endif
+        
+    ; must be immediate, must be constant:
+    .if ! .xmatch(.left(1, {constant}) , #)
+        ___error "Condition for 'case' must be immediate constant."
+    .elseif ! .const(.mid(1, .tcount({constant}) - 1, {constant}))
+        ___error "Condition for 'case' must be immediate constant."
+    .endif
+    
+    ; keep track of the number of case macros used for this switch:
+    .define thisSwitchCaseCounter .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_COUNTER", SWITCH_STATEMENT_COUNTER))
+    .ifndef thisSwitchCaseCounter     ; if not defined, this is the first case for this switch
+        thisSwitchCaseCounter .set 0
+    .endif
+    
+    ; .define and save constant for this case:
+    .define thisSwitchCaseConstant .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_CONSTANT", SWITCH_STATEMENT_COUNTER, thisSwitchCaseCounter))
+    thisSwitchCaseConstant = .mid(1, .tcount({constant}) - 1, {constant})
+    
+    ; every case, check if the constants are well structured values starting at zero and incrementing:
+    .if thisSwitchCaseCounter = 0  ; first case?
+        .if thisSwitchCaseConstant = 0  ; if first case constant starts at zero, could be a simple goto index switch
+            .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) .set 1
+        .else
+            .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) .set 0
+        .endif
+    .else ; not first case, check if this constant is equal to the old case constant + 1. If not, set to false
+        .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_CONSTANT", SWITCH_STATEMENT_COUNTER, thisSwitchCaseCounter - 1 )) + 1 <> thisSwitchCaseConstant
+            .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) .set 0
+        .endif
+    .endif
+
+    ;label for this case:
+    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, thisSwitchCaseCounter)):    
+    thisSwitchCaseCounter .set thisSwitchCaseCounter + 1
+    
+    .undefine thisSwitchCaseCounter
+    .undefine thisSwitchCaseConstant
+.endmacro
+
+.macro endswitch
+    .local SWITCH_STATEMENT_COUNTER
+    .local exit
+    stackPop "SWITCH_TABLE_STATEMENT_STACK", SWITCH_STATEMENT_COUNTER
+    .if SWITCH_STATEMENT_COUNTER < 0
+        ___error "'endswitch' without 'switch'."
+    .endif
+    
+    ; if goto mode option used
+    .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER)) 
+        ; if NOT compliant
+        .if !.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER))
+            ___error "Cannot use 'goto' mode with this case structure. Case values must start at zero and increment."
+        .endif
+    ; goto option not used:    
+    .else
+        .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) && (!.defined(.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))))
+            .warning "Use 'goto' mode with this case structure. Case values start at zero and increment. eg: switch <value>, goto"
+        .endif
+    .endif
+    
+    .define thisSwitchCaseCounter .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_COUNTER", SWITCH_STATEMENT_COUNTER))
+
+    .if FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG
+        .pushseg
+        .segment SWITCH_STATEMENT_DATA_SEG_STRING            
+    .else
+        ; Jump over tables if they are in the same segment. It would be better to define this table at the beginning
+        ; in the switch macro, but I don't see how to get ca65 to do this.
+        jmp exit
+    .endif
+    
+    ; define the tables:
+    
+    ; make constant table if not goto mode
+    .if !.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER))
+        .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", SWITCH_STATEMENT_COUNTER)):
+        .repeat thisSwitchCaseCounter, i
+            .byte .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_CONSTANT", SWITCH_STATEMENT_COUNTER, i))
+        .endrepeat
+    .endif
+    
+    ; make lobyte table:
+    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_LOBYTES", SWITCH_STATEMENT_COUNTER)):
+    .repeat thisSwitchCaseCounter, i
+        .byte <( .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, i)) - 1 )
+    .endrepeat
+    
+    ; make hibyte table:
+    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_HIBYTES", SWITCH_STATEMENT_COUNTER)):
+    .repeat thisSwitchCaseCounter, i
+        .byte >( .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, i)) - 1 )
+    .endrepeat
+    
+    .if FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG
+        .popseg
+    .endif
+    
+    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_TOTAL_COUNT", SWITCH_STATEMENT_COUNTER)) = thisSwitchCaseCounter
+    .undefine thisSwitchCaseCounter
+    exit:
+    .ifndef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
+        .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
+    .endif
+    ___generateBreakLabel
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+
+    
+    
+    
 
 
 
