@@ -257,7 +257,7 @@ With **elseif**:
 For greatest compatibility, only pass the single letter flag, with an 
 optional 'set or 'clear' with **else** or **elseif**.
 
-Long branches:
+## Long branches:
 
 By default, the if macro will generate appropriate branch opcodes. If
 the branch is too far away ca65 will generate an error. The macro
@@ -278,6 +278,11 @@ needed:
 
     setLongBranch +, +    ; if a code block is less than 127 bytes, the linker will say that a long branch is not needed here
     setLongBranch +, -    ; don't warn about code blocks less than 127 bytes
+
+The **if** macro can also accept an optional **long** or **short** parameter:
+
+    if <condition>, long  ; use JMP instruction to branch, regardless of setLongBranch setting
+    if <condition>, short ; use branch instruction to branch, regardless of setLongBranch setting
 
 #### If Statement with **goto** or **break**
 
@@ -361,7 +366,7 @@ expression, using a single register.
 
     mb x := CurrentWorld + #1 & #%00000111
 
-It will figure out the right side is going to have to use the
+The macro will determine right side is going to have to use the
 accumulator due to the operators, output the correct code ending with a
 **tax**. If the assignment was the accumulator, there would be no output
 for the assignment (since the accumulator is already holding the
@@ -517,3 +522,132 @@ Example:
        lda (palPtr),y
        sta backgroundPalette, y
     next
+
+#### Switch Statement
+
+Macro **switch** works with macros **case**, and **endswitch** to build a list of constants and corresponding address table 
+to use as a jump table. Example:
+
+    switch a	; switch on register a
+    
+        case #0
+        
+            ; case 0 code
+            ; ...
+            break
+            
+        case #12
+        
+            ; case 12 code
+            ; ...
+            break
+            
+        case #34
+        
+            ; case 34 code
+            ; ...
+            ; no break, fall through to case #9
+            
+        case #9
+        
+            ; case 9 code
+            ; ...
+            break
+            
+        case #4 
+        case #5
+        case #6
+        case #7
+        
+            ; case 4,5,6,7 code
+            ; ...
+            break
+            
+        case default
+        
+            ; default code
+    
+    endswitch
+
+If the macro setSwitchStatementDataSeg is used first, the data table will be placed in the defined segment and will allow the macro to not have to include 
+a JMP command to skip the data tables. Example:
+
+    setSwitchStatementDataSeg "RODATA"
+    switch a
+    
+        case #0
+        
+            ; case 0 code
+            ; ...
+            break
+            
+        case #1
+        
+            ; case 1 code
+            ; ...
+            break
+            
+        case #2
+        
+            ; case 2 code
+            ; ...
+            break
+            
+        case #3
+        
+            ; case 3 code
+            ; ...
+            break
+            
+        case #4 
+        case #5
+        case #6
+        case #7
+        
+            ; case 4,5,6,7 code
+            ; ...
+            break
+    
+    endswitch
+
+The previous example has ordered cases starting at zero. In this case, add the **goto** option to jump to the matching case without evlauation a match:
+
+    setSwitchStatementDataSeg "RODATA"
+    switch index, goto
+    
+        case #0
+        
+            ; case 0 code
+            ; ...
+            break
+            
+        case #1
+        
+            ; case 1 code
+            ; ...
+            break
+            
+        case #2
+        
+            ; case 2 code
+            ; ...
+            break
+            
+        case #3
+        
+            ; case 3 code
+            ; ...
+            break
+            
+        case #4 
+        case #5
+        case #6
+        case #7
+        
+            ; case 4,5,6,7 code
+            ; ...
+            break
+    
+    endswitch
+
+END
