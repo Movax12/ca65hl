@@ -17,8 +17,8 @@
 
 ; Macros to help with debugging.
 
-.ifndef _DEBUG_H_
-_DEBUG_H_ = 1
+.ifndef ::_DEBUG_H_
+::_DEBUG_H_ = 1
 
 ; default to off
 .ifndef ::__DEBUG__

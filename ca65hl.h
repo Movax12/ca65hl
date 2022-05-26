@@ -35,16 +35,20 @@
 ; > else
 ; > elseif
 ; > endif
-; > do
-; > while
-; > repeat
-; > until
+; > do..while
+; > repeat..until
 ; > while <> do
 ; > endwhile
 ; > break
+; > for..next
+; > switch..case..endswitch
+
+
 
 .ifndef ::_CA65HL_H_
 ::_CA65HL_H_ = 1
+
+::_CA65HL_USE_CUSTOM_SYNTAX_ = 1    ; Include macros to enable custom array syntax for instructions
 
 ; --------------------------------------------------------------------------------------------
 ; debugging for this file only. Change this to '1' for some console output.
@@ -56,9 +60,12 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-.include "stacks.h"     ; macros that allow for named stacks 
-.include "tokeneval.h"  ; macros to make token evaluation easier
-.include "debug.h"      ; macros to help with debugging
+.include "stacks.h"             ; macros that allow for named stacks 
+.include "tokeneval.h"          ; macros to make token evaluation easier
+.include "debug.h"              ; macros to help with debugging
+.if ::_CA65HL_USE_CUSTOM_SYNTAX_
+    .include "customSyntax.h"   ; macros to enable allow custom syntax for instructions
+.endif
 
 ; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
@@ -107,6 +114,7 @@
     .endrepeat
 .endmacro
 .endif
+
 
 ; --------------------------------------------------------------------------------------------
 ; Function: ___error
@@ -295,6 +303,7 @@
 
 .scope FLOW_CONTROL_VALUES
     IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
+    LAST_ENDIF_COUNT                    .set 0  ; keep track of the count of last IF-ENDIF block
     BREAK_STATEMENT_COUNT               .set 0  ; break statement counter - incremented after break label created
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
@@ -337,114 +346,6 @@
             ___error "Unknown long branch setting."
         .endif
     .endif
-.endmacro 
-
-; --------------------------------------------------------------------------------------------
-; Function: ___arraySyntax instr, op
-;
-; Parameters:
-;
-;   instr - CPU instruction to output.
-;   op - Operand for instruction.
-;
-;   Look for '[]' set and allow as an array, possibly with x or y indexed:
-;
-;   This macro will output the instruction in passed in instr but it will 
-;   process the operand, allowing an index defined by square braces: '[]'.
-;   In the square braces can be any constant expression, which will be 
-;   extracted and added onto the end of the operand as in normal assembly.
-;
-;   Example:
-; > lda foo[ 4 ] ; becomes: lda foo+4
-;
-;   As well, the index can contain 'x' or 'y', to indicate to use the 6502's
-;   indexed addressing modes.
-;
-;   Example:
-; > lda foo[ 4 + x ] ; becomes: lda foo+4, x
-
-.macro ___arraySyntax instr, op
-
-    .local open
-    .local close
-    .local reg
-    .local regPos
-    open   .set 0
-    close  .set 0
-    reg    .set 0
-    regPos  .set 0
-    printTokenListDebug {Instruction: instr op}
-    
-    ___findToken {op}, [, open
-    .if open
-        ___findToken {op}, ], close
-        .if close
-            ; look for '[ x +' type pattern
-            .if .xmatch( {.mid(open + 1, 1 ,{op})}, x)
-                reg .set ___math::REGX
-            .elseif .xmatch( {.mid(open + 1, 1 ,{op})}, y)
-                reg .set ___math::REGY
-            .endif
-            .if reg
-                ; require a +/-, but allow '[y]' or '[x]' if nothing else: 
-                ; if only a 'y' or 'x', define the constant as nothing
-                .if open + 2 = close
-                    .define _CONST 
-                    ; next has to be a + or -, or it is an error
-                .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, +)
-                    .define _CONST + .mid(open + 3, close - open - 3 ,{op})
-                .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, -)
-                    .define _CONST - .mid(open + 3, close - open - 3 ,{op})
-                .else
-                    ___error "Expected: '+' or '-'"
-                .endif
-            .else
-                ; No reg found yet. Check for '+x' anywhere in the brackets
-                ___findToken {op}, x, regPos
-                .if regPos && regPos < close
-                    reg .set ___math::REGX
-                .else
-                    ___findToken {op}, y, regPos
-                    .if regPos && regPos < close
-                        reg .set ___math::REGY
-                    .endif
-                .endif
-                ; found a valid register? to the left must be a +
-                .if reg
-                    .if !.xmatch( {.mid(regPos - 1, 1 ,{op})}, +) 
-                        ___error "Expected: '+' before x or y."
-                    .endif
-                    .define _CONST + .mid(open + 1, regPos - open - 2, {op}) .mid(regPos + 1, close - regPos - 1, {op})
-                .else
-                    ; no registers, constant is whatever is in the '[]'
-                    .define _CONST + .mid(open + 1, close - open - 1 ,{op})
-                .endif
-            .endif
-        .else
-            ___error "Expected: ']'"
-        .endif
-    .else
-        ; no '[]'
-        ; set value to make the expression below for .mid() become .tcount() only
-        open .set .tcount({op})
-        .define _CONST
-    .endif
-    
-    ; anything after the '[]' pair? this allows index to be anywhere in the expression, rather than only at the end
-    .if (.tcount({op}) > close + 1) && (close > 0 )
-        .define _AFTER () .mid(close + 1, .tcount({op}) - close - 1 , {op})
-    .else
-        .define _AFTER
-    .endif
-    .if reg = ___math::REGX
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
-    .elseif reg = ___math::REGY  
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
-    .else                                                                 
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST
-    .endif
-    .undefine _CONST
-    .undefine _AFTER
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -562,7 +463,7 @@
         .define _LEFT1 .left (1, {_LEFT})
         .if .match( _LEFT1, abc) 
             .if .ismnemonic(_LEFT1)
-                ___arraySyntax _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
+                _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
                 .if .xmatch(_LEFT1,lda)
                     left .set ___math::REGA
                 .elseif .xmatch(_LEFT1,ldx)
@@ -593,11 +494,11 @@
     .endif
     
     .if left = ___math::REGA
-        ___arraySyntax cmp, {_RIGHT}
+        cmp {_RIGHT}
     .elseif left = ___math::REGX
-        ___arraySyntax cpx, {_RIGHT}
+        cpx {_RIGHT}
     .elseif left = ___math::REGY
-        ___arraySyntax cpy, {_RIGHT}
+        cpy {_RIGHT}
     .endif
     .if ___compare::operator     = ___compare::GREATER
         ___setBranch G set
@@ -759,10 +660,10 @@
     ; if no registers explicitly defined before the op and something to load:
     .if !(.xmatch ({ .left(1,{exp}) }, a) || .xmatch ({ .left(1,{exp}) }, x) || .xmatch ({ .left(1,{exp}) }, y) )
         .if (op1 && ( pos1 > 0))
-            ___arraySyntax _LOAD, {.mid(0, pos1, {exp})}
+            _LOAD {.mid(0, pos1, {exp})}
         .elseif !op1
             ; if no operation, then something to load
-            ___arraySyntax _LOAD, {exp}
+            _LOAD {exp}
         .endif
     .endif
     
@@ -791,20 +692,20 @@
         .if pos1 + carryOp + 1 = .tcount({exp})
             adc #0
         .else
-            ___arraySyntax adc, {_RIGHT_EXP}
+            adc {_RIGHT_EXP}
         .endif
     .elseif op1 = ___math::SUBC 
         .if pos1 + carryOp + 1 = .tcount({exp})
             sbc #0
         .else
-            ___arraySyntax sbc, {_RIGHT_EXP}
+            sbc {_RIGHT_EXP}
         .endif
     .elseif op1 = ___math::SUB
         sec
-        ___arraySyntax sbc, {_RIGHT_EXP}
+        sbc {_RIGHT_EXP}
     .elseif op1 = ___math::ADD
         clc
-        ___arraySyntax adc, {_RIGHT_EXP}
+        adc {_RIGHT_EXP}
     .elseif op1 = ___math::SHL
         .repeat _RIGHT_EXP
             asl a
@@ -814,11 +715,11 @@
             lsr a
         .endrepeat
     .elseif op1 = ___math::AND_
-        ___arraySyntax and, {_RIGHT_EXP}
+        and {_RIGHT_EXP}
     .elseif op1 = ___math::OR
-        ___arraySyntax ora, {_RIGHT_EXP}
+        ora {_RIGHT_EXP}
     .elseif op1 = ___math::EOR_
-        ___arraySyntax eor, {_RIGHT_EXP}
+        eor {_RIGHT_EXP}
     .endif
     .undefine _RIGHT_EXP
     .undefine _LOAD
@@ -914,11 +815,11 @@
     
     .if !leftReg ; no register defined? just store: 
         .if rightReg = ___math::REGA
-            ___arraySyntax sta, {_LEFT}
+            sta {_LEFT}
         .elseif rightReg = ___math::REGX
-            ___arraySyntax stx, {_LEFT}
+            stx {_LEFT}
         .elseif rightReg = ___math::REGY
-            ___arraySyntax sty, {_LEFT}
+            sty {_LEFT}
         .endif
     .elseif leftReg = ___math::REGA
         .if rightReg = ___math::REGX
@@ -983,14 +884,14 @@
             ; if it is a macro, just call the macro:
             .if .definedmacro ( .left(1,{S}))
                 printTokenListDebug {Macro: S}
-                .left (1,{S})  .mid (1, .tcount({S}) - 1, {S} ) 
+                .left (1,{S}) { .mid (1, .tcount({S}) - 1, {S} ) }
             .else
                 ; first check for operators that indicate comparison : > < <> >= <=
                 ___findCompareOperator {S}
                 .if ___compare::found
                     ___doCompare {S}
                 .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
-                    ___arraySyntax .left (1,{S}), {.mid (1, .tcount({S}) - 1, {S} )}
+                    .left (1,{S}) .mid (1, .tcount({S}) - 1, {S} )
                 .else
                     ___evalMathOp {S}
                 .endif
@@ -1133,7 +1034,7 @@
 ; (inside a loop) and branch to the next break label. If no 'goto' or 'break', it will branch to 
 ; the next ENDIF (or ELSE, or ELSEIF) on an inverted condition.
 
-.macro if condition, branchtype
+.macro if condition, opt1, opt2
     
     printTokenListDebug {Branch_Statement: condition}
     ; --------------------------------------------------------------------------------------------
@@ -1155,10 +1056,7 @@
   ;     .exitmacro
   ;  .endif
     ; --------------------------------------------------------------------------------------------
-    .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
-        ___error "Cannot use 'if' statement from within conditional expression."
-    .endif
-    FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
+    
     
     .local exitBranchEvaluation      ;  label: branch to this label on failed condition (acts like a pass/true condition with a code block defined by if..endif)
     .local longJumpLabel             ;  label: for long jump: branch to this label on a passed/true condition when long jumps active
@@ -1180,6 +1078,7 @@
     .local foundAND                  ;  flag: found an && when scanning ahead while considering if bracket set is negated
     .local foundOR                   ;  flag: found an || when scanning ahead while considering if bracket set is negated
     .local useLongJump               ;  flag: set true if macro param. branchtype is 'long' or if omitted set to true if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
+    .local chainedFlag               ;  flag: branch to next enclosing ENDIF for ELSE and ELSEIF structures
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
@@ -1188,6 +1087,8 @@
     conditionTokenCount     .set 0
     gotoUserLabel           .set 0
     gotoBreakLabel          .set 0
+    chainedFlag             .set 0
+    useLongJump             .set -1 ; invalid, needs to be set below
     
     ; these are initialized before use:
     ; foundTokenPosition      .set 0
@@ -1200,19 +1101,52 @@
     ; foundAND                .set 0
     ; foundOR                 .set 0
     
-    ; figure out long jump:
-    .ifnblank branchtype
-        .if .xmatch( branchtype, long )
-            useLongJump .set 1
-        .elseif .xmatch( branchtype, short )
-            useLongJump .set 0
+    .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
+        ___error "Cannot use 'if' statement from within conditional expression."
+    .endif
+    FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
+    FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT .set -1       ; -1 means invalid. only valid after an ENDIF macro
+    
+    ; check options, in any order. Note: no way to make this a loop - opt1, opt2 must be referenced directly
+    .ifnblank opt1
+        .if .xmatch( opt1, long ) || .xmatch( opt1, short )
+            .if useLongJump = -1
+                .if .xmatch( opt1, long )
+                    useLongJump .set 1
+                .else
+                    useLongJump .set 0
+                .endif
+            .else
+                __error "Duplicate option."
+            .endif
+        .elseif .xmatch( opt1, chain )
+            chainedFlag .set 1
         .else
-            ___error "Invalid branch option. Valid is 'long' or 'short'."
+            ___error "Invalid option. Valid options are 'chain', or one of 'long', 'short'."
         .endif
-    .else
+    .endif
+    .ifnblank opt2
+        .if .xmatch( opt2, long ) || .xmatch( opt2, short )
+            .if useLongJump = -1
+                .if .xmatch( opt2, long )
+                    useLongJump .set 1
+                .else
+                    useLongJump .set 0
+                .endif
+            .else
+                __error "Duplicate option."
+            .endif
+        .elseif .xmatch( opt2, chain )
+            chainedFlag .set 1
+        .else
+            ___error "Invalid option. Valid options are 'chain', or one of 'long', 'short'."
+        .endif
+    .endif
+    ; no long jump option passed, use setLongBranch setting:
+    .if useLongJump = -1
         useLongJump .set FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
     .endif
-        
+    
     ; array for label locations: (uses global to reuse ident)
     .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
@@ -1263,7 +1197,19 @@
     .else 
         ; invert condition to branch to the next ENDIF label
         negateBracketSet .set !negateBracketSet
-        .define destinationLabel .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
+        ; if 'chain' option passed, branch to the end of the enclosing IF-ENDIF block
+        .if chainedFlag
+            .local ENCLOSING_IF_STATEMENT_COUNT
+            stackPeek "IF_STATEMENT_STACK", ENCLOSING_IF_STATEMENT_COUNT
+            
+            .if ENCLOSING_IF_STATEMENT_COUNT = -1
+                ___error "Invalid chain option."
+            .endif    
+            stackPush "IF_STATEMENT_CHAIN_NEXT_ENDIF", ENCLOSING_IF_STATEMENT_COUNT
+            .define destinationLabel .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", ENCLOSING_IF_STATEMENT_COUNT ))
+        .else
+            .define destinationLabel .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
+        .endif
     .endif
     
     ; If long jump active, invert condition and branch to exitBranchEvaluation to skip the 'jmp destinationLabel'
@@ -1511,6 +1457,57 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+; Function: ___verifyChain
+;
+; Parameters:
+;
+;       _IF_STATEMENT_COUNT - The IF statement number that is being processed.
+;
+; This macro invoked only from ELSE or ELSEIF checks for any chain requests and verifies they are valid.
+; It will also look for opportunities to recommend chains be used.
+; Used by <elseif> and <else>.
+
+.macro ___verifyChain _IF_STATEMENT_COUNT
+    .local ENCLOSING_IF_STATEMENT_COUNT
+    .if FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT <> -1 ; if last macro of IF..ELSEIF..ELSE..ENDIF was an ENDIF
+        stackPop "IF_STATEMENT_CHAIN_NEXT_ENDIF", ENCLOSING_IF_STATEMENT_COUNT  ; pop, ignore if invalid stack, it will just fail this test:
+        .if ENCLOSING_IF_STATEMENT_COUNT = _IF_STATEMENT_COUNT
+            .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) = *, error, "Invalid chain option used." ; address must match last ENDIF
+        .else
+            .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) <> *, warning, "To optimize branch generation, apply chain to previous IF statement. eg: if (condition) , chain"
+        .endif
+    .endif
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ___checkForTailJMP
+;
+; Parameters:
+;
+;       knownFlagStatus -   if knownFlagStatus is 'jmp' this macro will check that the option is valid. If 'jmp' not used, it will 
+;                           suggest that it could be used if it is valid to do so.
+;
+; Use this code with ca65hl to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
+; If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF macro that will suppress the macro's normal generation of a 
+; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
+    
+.macro ___checkForTailJMP knownFlagStatus
+    .ifdef ::_CUSTOM_SYNTAX_
+        .if .xmatch( knownFlagStatus, jmp)
+            .if _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0
+                .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) = *, warning, "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
+            .else
+                .warning "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
+            .endif
+        .else
+            .if _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0
+                .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) <> *, warning, "JMP before ELSE/ELSEIF. Suggested: use 'jmp' option. eg: elseif (condition) , jmp"
+            .endif
+        .endif
+    .endif    
+.endmacro
+
+; --------------------------------------------------------------------------------------------
 ; Function: elseif condition, knownFlagStatus
 ;
 ; Parameters:
@@ -1527,20 +1524,27 @@
 .macro elseif condition, knownFlagStatus, branchtype
 
     .local IF_STATEMENT_COUNT
+    
     stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
     .if IF_STATEMENT_COUNT < 0 
         ___error "'elseif' without 'if'"
     .endif
     
     .ifdef .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT ))
-        ___error "No 'elseif' after 'else'."
+        ___error "Not allowed: 'elseif' after 'else'."
     .endif
+    
+    ___verifyChain IF_STATEMENT_COUNT
+    
+    ___checkForTailJMP knownFlagStatus
     
     ; jump to endif
     .ifnblank knownFlagStatus
-        setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
-        ___clearBranchSet
+        .if !.xmatch( knownFlagStatus, jmp)
+            setBranch knownFlagStatus
+            ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
+            ___clearBranchSet
+        .endif
     .else
         jmp .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
     .endif
@@ -1595,11 +1599,16 @@
     ; mark this IF as having an ELSE
     .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT )) = 1
     
+    ___verifyChain IF_STATEMENT_COUNT
+    ___checkForTailJMP knownFlagStatus
+    
     ; jump to endif:
     .ifnblank knownFlagStatus
-        setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
-        ___clearBranchSet
+        .if !.xmatch( knownFlagStatus, jmp)
+            setBranch knownFlagStatus
+            ___Branch branchFlag, branchCondition, .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
+            ___clearBranchSet
+        .endif
     .else
         jmp .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
     .endif
@@ -1654,7 +1663,7 @@
     .else
         .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
     .endif
-    
+    FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT .set IF_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1976,7 +1985,7 @@
 ;
 
 ; Additional notes:
-; Macro 'switch' works with macros 'case', 'default', 'endswitch' to build a list of constants and corresponding address table to use as a jump table.
+; Macro 'switch' works with macros 'case', 'endswitch' to build a list of constants and corresponding address table to use as a jump table.
 ; if setSwitchStatementDataSeg is used first, the data table will be placed in the defined segment and will allow the macro to not have to include a JMP command to skip 
 ; the data tables.
 
@@ -2000,14 +2009,14 @@
             .define SWITCH_INFO_REG "none"
         .elseif  .xmatch( reg, x )
             txa
-            .define SWITCH_INFO_REG "a"
+            .define SWITCH_INFO_REG "A"
         .elseif  .xmatch( reg, y )
             tya
-            .define SWITCH_INFO_REG "a"
+            .define SWITCH_INFO_REG "A"
         .else 
             lda reg
         .endif
-        .define SWITCH_INFO_REG "x"
+        .define SWITCH_INFO_REG "X"
         .define INDEX_REG_FOR_TABLE x
     .else ; no compare, just branch on lookup value in reg. x or y
         .if .xmatch( reg, x )
@@ -2157,8 +2166,6 @@
         .endif
     .endif
     
-    .define thisSwitchCaseCounter .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_COUNTER", SWITCH_STATEMENT_COUNTER))
-
     .if FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG
         .pushseg
         .segment SWITCH_STATEMENT_DATA_SEG_STRING            
@@ -2169,6 +2176,7 @@
     .endif
     
     ; define the tables:
+    .define thisSwitchCaseCounter .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_COUNTER", SWITCH_STATEMENT_COUNTER))
     
     ; make constant table if not goto mode
     .if !.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER))
@@ -2197,6 +2205,7 @@
     .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_TOTAL_COUNT", SWITCH_STATEMENT_COUNTER)) = thisSwitchCaseCounter
     .undefine thisSwitchCaseCounter
     exit:
+    ; if no matches, 'switch' macro will jump here if no default case:
     .ifndef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
         .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
     .endif
