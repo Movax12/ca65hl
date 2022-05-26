@@ -105,7 +105,7 @@
 ;   Example:
 ; > lda foo[ 4 + x ] ; becomes: lda foo+4, x
 
-.macro ___arraySyntax instr, op
+.macro ___arraySyntax instr, op, index
 
     .local open
     .local close
@@ -118,6 +118,12 @@
     close  .set 0
     reg    .set 0
     regPos  .set 0
+    
+    ; if index was passed, treat as normal 6502 syntax and quit, since this syntax does not use commas
+    .ifnblank index
+        .left(1,instr) op, index
+        .exitmacro
+    .endif
     
     ___findToken {op}, [, open
     ; also check if position 0 is valid for open, since ___findToken won't find the first position
@@ -215,211 +221,127 @@
 
 .macro macro_lda operand, index
     .undefine lda
-    .if .paramcount > 1
-        lda operand, index
-    .else
-        ___arraySyntax lda, operand
-    .endif
+    ___arraySyntax lda, operand, index
     .define lda macro_lda
 .endmacro
 
 .macro macro_sta operand, index
     .undefine sta
-    .if .paramcount > 1
-        sta operand, index
-    .else
-        ___arraySyntax sta, operand
-    .endif
+    ___arraySyntax sta, operand, index
     .define sta macro_sta
 .endmacro
 
 .macro macro_ldx operand, index
     .undefine ldx
-    .if .paramcount > 1
-        ldx operand, index
-    .else
-        ___arraySyntax ldx, operand
-    .endif
+    ___arraySyntax ldx, operand, index
     .define ldx macro_ldx
 .endmacro
 
 .macro macro_stx operand, index
     .undefine stx
-    .if .paramcount > 1
-        stx operand, index
-    .else
-        ___arraySyntax stx, operand
-    .endif
+    ___arraySyntax stx, operand, index
     .define stx macro_stx
 .endmacro
 
 .macro macro_ldy operand, index
     .undefine ldy
-    .if .paramcount > 1
-        ldy operand, index
-    .else
-        ___arraySyntax ldy, operand
-    .endif
+    ___arraySyntax ldy, operand, index
     .define ldy macro_ldy
 .endmacro
 
 .macro macro_sty operand, index
     .undefine sty
-    .if .paramcount > 1
-        sty operand, index
-    .else
-        ___arraySyntax sty, operand
-    .endif
+    ___arraySyntax sty, operand, index
     .define sty macro_sty
 .endmacro
 
 .macro macro_adc operand, index
     .undefine adc
-    .if .paramcount > 1
-        adc operand, index
-    .else
-        ___arraySyntax adc, operand
-    .endif
+    ___arraySyntax adc, operand, index
     .define adc macro_adc
 .endmacro
 
 .macro macro_and operand, index
     .undefine and
-    .if .paramcount > 1
-        and operand, index
-    .else
-        ___arraySyntax and, operand
-    .endif
+    ___arraySyntax and, operand, index
     .define and macro_and
 .endmacro
 
 .macro macro_asl operand, index
     .undefine asl
-    .if .paramcount > 1
-        asl operand, index
-    .else
-        ___arraySyntax asl, operand
-    .endif
+    ___arraySyntax asl, operand, index
     .define asl macro_asl
 .endmacro
 
 .macro macro_cmp operand, index
     .undefine cmp
-    .if .paramcount > 1
-        cmp operand, index
-    .else
-        ___arraySyntax cmp, operand
-    .endif
+    ___arraySyntax cmp, operand, index
     .define cmp macro_cmp
 .endmacro
 
 .macro macro_dec operand, index
     .undefine dec
-    .if .paramcount > 1
-        dec operand, index
-    .else
-        ___arraySyntax dec, operand
-    .endif
+    ___arraySyntax dec, operand, index
     .define dec macro_dec
 .endmacro
 
 .macro macro_eor operand, index
     .undefine eor
-    .if .paramcount > 1
-        eor operand, index
-    .else
-        ___arraySyntax eor, operand
-    .endif
+    ___arraySyntax eor, operand, index
     .define eor macro_eor
 .endmacro
 
 .macro macro_inc operand, index
     .undefine inc
-    .if .paramcount > 1
-        inc operand, index
-    .else
-        ___arraySyntax inc, operand
-    .endif
+    ___arraySyntax inc, operand, index
     .define inc macro_inc
 .endmacro
 
 .macro macro_lsr operand, index
     .undefine lsr
-    .if .paramcount > 1
-        lsr operand, index
-    .else
-        ___arraySyntax lsr, operand
-    .endif
+    ___arraySyntax lsr, operand, index
     .define lsr macro_lsr
 .endmacro
 
 .macro macro_ora operand, index
     .undefine ora
-    .if .paramcount > 1
-        ora operand, index
-    .else
-        ___arraySyntax ora, operand
-    .endif
+    ___arraySyntax ora, operand, index
     .define ora macro_ora
 .endmacro
 
 .macro macro_rol operand, index
     .undefine rol
-    .if .paramcount > 1
-        rol operand, index
-    .else
-        ___arraySyntax rol, operand
-    .endif
+    ___arraySyntax rol, operand, index
     .define rol macro_rol
 .endmacro
 
 .macro macro_ror operand, index
     .undefine ror
-    .if .paramcount > 1
-        ror operand, index
-    .else
-        ___arraySyntax ror, operand
-    .endif
+    ___arraySyntax ror, operand, index
     .define ror macro_ror
 .endmacro
 
 .macro macro_sbc operand, index
     .undefine sbc
-    .if .paramcount > 1
-        sbc operand, index
-    .else
-        ___arraySyntax sbc, operand
-    .endif
+    ___arraySyntax sbc, operand, index
     .define sbc macro_sbc
 .endmacro
 
 .macro macro_bit operand, index
     .undefine bit
-    .if .paramcount > 1
-        bit operand, index
-    .else
-        ___arraySyntax bit, operand
-    .endif
+    ___arraySyntax bit, operand, index
     .define bit macro_bit
 .endmacro
 
 .macro macro_cpx operand, index
     .undefine cpx
-    .if .paramcount > 1
-        cpx operand, index
-    .else
-        ___arraySyntax cpx, operand
-    .endif
+    ___arraySyntax cpx, operand, index
     .define cpx macro_cpx
 .endmacro
 
 .macro macro_cpy operand, index
     .undefine cpy
-    .if .paramcount > 1
-        cpy operand, index
-    .else
-        ___arraySyntax cpy, operand
-    .endif
+    ___arraySyntax cpy, operand, index
     .define cpy macro_cpy
 .endmacro
 
