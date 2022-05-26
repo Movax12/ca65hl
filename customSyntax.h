@@ -142,7 +142,7 @@
                 .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, -)
                     .define _CONST - (.mid(open + 3, close - open - 3 ,{op}))
                 .else
-                    ___error "Expected: '+' or '-'"
+                    .error "Expected: '+' or '-'"
                 .endif
             .else
                 ; No reg found yet. Check for '+x' anywhere in the brackets
@@ -158,7 +158,7 @@
                 ; found a valid register? to the left must be a +
                 .if reg
                     .if !.xmatch( {.mid(regPos - 1, 1 ,{op})}, +) 
-                        ___error "Expected: '+' before x or y."
+                        .error "Expected: '+' before x or y."
                     .endif
                     ; lda foo[ 3 + x - 5 ]
                     ;      0 1 2 3 4 5 6 7
@@ -169,7 +169,7 @@
                 .endif
             .endif
         .else
-            ___error "Expected: ']'"
+            .error "Expected: ']'"
         .endif
     .else
         ; no '[]'
@@ -195,14 +195,12 @@
     .undefine _AFTER
 .endmacro
 
-; --------------------------------------------------------------------------------------------
-; Allow custom syntax for all modes that use operands:
 
 .macro macro_jmp operand
     .undefine jmp
     jmp operand
     
-    ; Use this code with ca65hl to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
+    ; Use this code with ca65hl.h to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
     ; If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF macro that will suppress the macro's normal generation of a 
     ; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
     .ifdef ::_CA65HL_H_
@@ -212,6 +210,9 @@
     
     .define jmp macro_jmp
 .endmacro
+
+; --------------------------------------------------------------------------------------------
+; Allow custom syntax for all modes that use operands:
 
 .macro macro_lda operand, index
     .undefine lda
