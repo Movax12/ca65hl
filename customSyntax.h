@@ -18,8 +18,7 @@
 ; File: customSyntax.h
 ;
 ; --------------------------------------------------------------------------------------------
-; Custom instruction syntax section.
-; Allow custom controls for instructions, but still use ca65 built in functions to evaluate
+; Allow custom control over instructions, but still use ca65 built in functions to evaluate
 ; the instructions. This was a part of ca65hl, and the custom syntax only worked with ca65hl macros, but
 ; it has been separated into this file and will work everywhere by using the ca65 feature:
 ;
@@ -29,8 +28,8 @@
 ; allow ca65 to process the instruction normally. Be careful to not declare your own macros with instruction
 ; names accidentally.
 ;
-; The instruction macros will process their operands through the ___arraySyntax macro that results in allowing
-; an alternative syntax that allows array like offsets an indexing.
+; The instruction macros will process their operands through the ___arraySyntax macro that allows
+; an alternative syntax with array like indexing with constant expressions and the x or y registers.
 ; 
 ;   Example:
 ; > lda foo[ 4 ] ; becomes: lda foo + 4
@@ -41,9 +40,14 @@
 ;   Example:
 ; > lda foo[ 4 + x ] ; becomes: lda foo + 4, x
 ;
+;   The index can be anywhere in the expression:
+;
+;   Example:
+; > lda [ y - 4 ]foo
+;
 ; The macro will allow any combination of constant values with either a y or x included, but the index register
-; must be first in the square brackets, or the index register must be preceded by a plus (+). The macro then converts it
-; to standard syntax and passes it to ca65 to verify the addressing mode. 
+; must be first in the square brackets, or the index register must be preceded by a plus (+). The macro then converts 
+; it to standard syntax and passes it to ca65 to verify the addressing mode and assemble the instruction.
 
 .ifndef ::_CUSTOM_SYNTAX_
 ::_CUSTOM_SYNTAX_ = 1
