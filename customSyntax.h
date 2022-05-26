@@ -118,7 +118,6 @@
     close  .set 0
     reg    .set 0
     regPos  .set 0
-    printTokenListDebug {Instruction: instr op}
     
     ___findToken {op}, [, open
     ; also check if position 0 is valid for open, since ___findToken won't find the first position
