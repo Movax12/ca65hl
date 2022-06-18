@@ -68,6 +68,10 @@
 .endif
 
 ; --------------------------------------------------------------------------------------------
+; define this so breaks work okay the first time: (value doesn't matter)
+.define ___breakTypeStackName NULL
+
+; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
 ; 'set' or 'clear' can be added after keywords when in use.
 ; 'set' will have no effect, 'clear' will invert the flag.
@@ -304,7 +308,6 @@
 .scope FLOW_CONTROL_VALUES
     IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
     LAST_ENDIF_COUNT                    .set 0  ; keep track of the count of last IF-ENDIF block
-    BREAK_STATEMENT_COUNT               .set 0  ; break statement counter - incremented after break label created
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
     FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
@@ -315,6 +318,11 @@
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
     LONG_JUMP_WARNINGS                  .set 1  ; flag: output warnings if long jump not needed
     INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
+    BREAK_COUNT_DOWHILE                 .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
+    BREAK_TYPE_DEFINED                  .set 0  ; flag: only undefine ___breakTypeStackName if set
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -461,24 +469,26 @@
     ; no registers found, so first we will load a register, or eval an expression
     .if !left
         .define _LEFT1 .left (1, {_LEFT})
-        .if .match( _LEFT1, abc) 
-            .if .ismnemonic(_LEFT1)
-                _LEFT1, {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
-                .if .xmatch(_LEFT1,lda)
-                    left .set ___math::REGA
-                .elseif .xmatch(_LEFT1,ldx)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,ldy)
-                    left .set ___math::REGY
-                .elseif .xmatch(_LEFT1,inx)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,dex)
-                    left .set ___math::REGX
-                .elseif .xmatch(_LEFT1,iny)
-                    left .set ___math::REGY
-                .elseif .xmatch(_LEFT1,dey)
-                    left .set ___math::REGY
-                .endif
+        ; look for characters, then see if they match a supported instruction
+        .if .match( _LEFT1, abc)                        
+            .if .xmatch(_LEFT1,lda)
+                left .set ___math::REGA
+            .elseif .xmatch(_LEFT1,ldx)
+                left .set ___math::REGX
+            .elseif .xmatch(_LEFT1,ldy)
+                left .set ___math::REGY
+            .elseif .xmatch(_LEFT1,inx)
+                left .set ___math::REGX
+            .elseif .xmatch(_LEFT1,dex)
+                left .set ___math::REGX
+            .elseif .xmatch(_LEFT1,iny)
+                left .set ___math::REGY
+            .elseif .xmatch(_LEFT1,dey)
+                left .set ___math::REGY
+            .endif
+            ; if match found, output the instruction
+            .if left
+                _LEFT1 {.right( .tcount({_LEFT}) - 1, {_LEFT} )}
             .endif
         .endif
         .if !left
@@ -881,21 +891,19 @@
                 ___evalMathOp {S}
             .endif
         .else 
-            ; if it is a macro, just call the macro:
-            .if .definedmacro ( .left(1,{S}))
+            ; check for comparison before macros, because instructions could be redefined as macros
+            ___findCompareOperator {S}
+            .if ___compare::found
+                ___doCompare {S}
+            .elseif .definedmacro ( .left(1,{S}))
                 printTokenListDebug {Macro: S}
                 .left (1,{S}) { .mid (1, .tcount({S}) - 1, {S} ) }
+            .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
+                .left (1,{S}) .mid (1, .tcount({S}) - 1, {S} )
             .else
-                ; first check for operators that indicate comparison : > < <> >= <=
-                ___findCompareOperator {S}
-                .if ___compare::found
-                    ___doCompare {S}
-                .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
-                    .left (1,{S}) .mid (1, .tcount({S}) - 1, {S} )
-                .else
-                    ___evalMathOp {S}
-                .endif
+                ___evalMathOp {S}
             .endif
+
         .endif
         ; -------------------------------------
     .endif
@@ -1677,6 +1685,7 @@
     stackPush "DO_WHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
     .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
+    ___pushCurrentBreakType DOWHILE
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1704,6 +1713,7 @@
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
         if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
+        ___popCurrentBreakType
         ___generateBreakLabel
     .endif
 .endmacro
@@ -1743,6 +1753,7 @@
     if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
+    ___popCurrentBreakType
     ___generateBreakLabel
 .endmacro
 
@@ -1760,6 +1771,7 @@
 ;   <do>, <while>, <repeat>, <until>
 
 .macro while_do condition, branchtype
+    ___pushCurrentBreakType WHILEDO
     stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
@@ -1800,8 +1812,41 @@
         jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
     .endif
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
+    ___popCurrentBreakType
     ___generateBreakLabel
 .endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ___pushCurrentBreakType
+;
+; Keep track of the current type of loop for generating breaks.
+;
+; Parameters: Type of loop that was started
+; Valid types:
+;   DOWHILE
+;   WHILEDO
+;   FOR
+;   SWITCH 
+
+.macro ___pushCurrentBreakType breakType
+    pushTokenList "BREAK_TYPE", breakType
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ___popCurrentBreakType
+;
+; Retrive the current loop type
+;
+
+.macro ___popCurrentBreakType 
+    popTokenList "BREAK_TYPE"
+    .if FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED
+        .undefine ___breakTypeStackName
+    .endif
+    .define ___breakTypeStackName poppedTokenList
+    FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED .set 1
+.endmacro
+    
 
 ; --------------------------------------------------------------------------------------------
 ; Function: ___verifyBreakInsideLoop
@@ -1822,6 +1867,8 @@
     .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0 && switchCount < 0
         ___error "Invalid 'break'."
     .endif
+    ___popCurrentBreakType
+    ___pushCurrentBreakType ___breakTypeStackName
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1836,14 +1883,16 @@
 
 .macro break knownFlagStatus
     ___verifyBreakInsideLoop
+    .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName)))
     .ifnblank knownFlagStatus
         setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), FLOW_CONTROL_VALUES::___breakStatementCounter))
         ___clearBranchSet
     .else
-        jmp .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+        jmp .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), FLOW_CONTROL_VALUES::___breakStatementCounter))
     .endif
-    stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
+    stackPush .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)), FLOW_CONTROL_VALUES::___breakStatementCounter
+    .undefine ___breakStatementCounter
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1859,17 +1908,17 @@
 
 .macro ___generateBreakLabel checkMoreBreakStatements
     .local _BREAK_STATEMENT_COUNT
-    stackPeek "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT  
+    stackPeek .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT  
     .ifnblank checkMoreBreakStatements  ; recursive call to pop stack of any matching break statements
         .if _BREAK_STATEMENT_COUNT = checkMoreBreakStatements
-            stackPop "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT
+            stackPop .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT
             ___generateBreakLabel _BREAK_STATEMENT_COUNT
         .endif
     .elseif _BREAK_STATEMENT_COUNT >= 0
-        stackPop "BREAK_STATEMENT_STACK", _BREAK_STATEMENT_COUNT
-        .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", _BREAK_STATEMENT_COUNT)):
+        stackPop .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT
+        .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), _BREAK_STATEMENT_COUNT)):
         ___generateBreakLabel _BREAK_STATEMENT_COUNT
-        FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT + 1
+        FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName))) .set FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName))) + 1
     .endif
 .endmacro
 
@@ -1910,7 +1959,7 @@
     .endif
     .define COND () ( condition )
     ; --------------------------------------------------------------------------------------------
-    
+    ___pushCurrentBreakType FOR
     ; execute the INIT, before the loop
     ___evaluateStatementList {INIT}
     
@@ -1954,6 +2003,7 @@
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
+    ___popCurrentBreakType
     ___generateBreakLabel
 .endmacro
 
@@ -1992,7 +2042,7 @@
 .macro switch reg, mode
 
     .local gotoMode
-    
+    ___pushCurrentBreakType SWITCH
     .ifnblank mode
         .if .xmatch( {mode}, goto )
             gotoMode = 1
@@ -2067,7 +2117,7 @@
 ; Function case
 ;
 ;   Parameters
-;       constant - immediate constant, eg #1234, or 'default' to define the default case.
+;       constant - immediate byte constant, eg #$23, or 'default' to define the default case.
 ; 
 ; The parameter must be a constant at assembly time. If it is 'default' no more case macros can be defined 
 ; for this switch.
@@ -2209,6 +2259,7 @@
     .ifndef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
         .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
     .endif
+    ___popCurrentBreakType
     ___generateBreakLabel
 .endmacro
 
