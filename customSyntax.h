@@ -195,7 +195,7 @@
     .endif
     .if reg = REGX
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
-    .elseif reg = REGY 
+    .elseif reg = REGY
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
     .else                                                                 
         .left(1,instr) .mid(0, open, {op}) _AFTER _CONST

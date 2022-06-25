@@ -25,6 +25,12 @@
     ::__DEBUG__ = 0
 .endif
 
+.ifndef ::__TODO_MESSAGES__
+    ::__TODO_MESSAGES__ = 0
+.endif
+
+
+
 ; Macros for conditional debug code, TODO reminders, etc
 ; --------------------------------------------------------------------------------------------
 
@@ -36,8 +42,8 @@
     .define debugCode(code)
 .endif
 
-.if ::__DEBUG__
-    .define TODO(text) .out text
+.if ::__TODO_MESSAGES__
+    .define TODO(text) .warning .concat("TODO MESSAGE:",text)
 .else 
     .define TODO(text)
 .endif

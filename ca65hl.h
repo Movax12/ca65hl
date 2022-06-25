@@ -48,7 +48,15 @@
 .ifndef ::_CA65HL_H_
 ::_CA65HL_H_ = 1
 
-::_CA65HL_USE_CUSTOM_SYNTAX_ = 1    ; Include macros to enable custom array syntax for instructions
+; Include macros to enable custom array syntax for instructions
+.ifndef ::_CA65HL_USE_CUSTOM_SYNTAX_
+    ::_CA65HL_USE_CUSTOM_SYNTAX_ = 1
+.endif
+
+; Warn in some cases if turned on:
+.ifndef ::__WARNING_LEVEL__
+    ::__WARNING_LEVEL__ = 0
+.endif
 
 ; --------------------------------------------------------------------------------------------
 ; debugging for this file only. Change this to '1' for some console output.
@@ -69,7 +77,7 @@
 
 ; --------------------------------------------------------------------------------------------
 ; define this so breaks work okay the first time: (value doesn't matter)
-.define ___breakTypeStackName NULL
+.define ___loopType NULL
 
 ; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
@@ -322,7 +330,7 @@
     BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
     BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
     BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
-    BREAK_TYPE_DEFINED                  .set 0  ; flag: only undefine ___breakTypeStackName if set
+    BREAK_TYPE_DEFINED                  .set 0  ; flag: only undefine ___loopType if set
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -1124,8 +1132,6 @@
                 .else
                     useLongJump .set 0
                 .endif
-            .else
-                __error "Duplicate option."
             .endif
         .elseif .xmatch( opt1, chain )
             chainedFlag .set 1
@@ -1191,9 +1197,13 @@
             gotoUserLabel .set 1
             .define destinationLabel .mid(conditionTokenCount + 1, .tcount({condition}) - conditionTokenCount - 1, {condition}) ; capture everything after the 'goto'
         .elseif .xmatch( .mid(conditionTokenCount, 1, {condition}), break )
-            ___verifyBreakInsideLoop               ; valid break?  
             gotoBreakLabel .set 1
-            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_%04X_LABEL", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT))
+             ___verifyBreakInsideLoop
+            ; peek at stack:
+            ___popLoopType
+            ___pushLoopType ___loopType
+            .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", ___loopType))
+            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
         .else
             .if FLOW_CONTROL_VALUES::INTERNAL_CALL
                 ___error "Error in expression."
@@ -1446,9 +1456,10 @@
     ; which also is the start of a code block for an IF..ENDIF since it branches to ENDIF on an 
     ; inverted condition.
     exitBranchEvaluation:   
-    
+
     .if gotoBreakLabel
-        stackPush "BREAK_STATEMENT_STACK", FLOW_CONTROL_VALUES::BREAK_STATEMENT_COUNT
+        stackPush .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType), FLOW_CONTROL_VALUES::___breakStatementCounter
+        .undefine ___breakStatementCounter
     .elseif !gotoUserLabel
         stackPush "IF_STATEMENT_STACK", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
     .endif
@@ -1481,7 +1492,7 @@
         stackPop "IF_STATEMENT_CHAIN_NEXT_ENDIF", ENCLOSING_IF_STATEMENT_COUNT  ; pop, ignore if invalid stack, it will just fail this test:
         .if ENCLOSING_IF_STATEMENT_COUNT = _IF_STATEMENT_COUNT
             .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) = *, error, "Invalid chain option used." ; address must match last ENDIF
-        .else
+        .elseif ::__WARNING_LEVEL__ > 0
             .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) <> *, warning, "To optimize branch generation, apply chain to previous IF statement. eg: if (condition) , chain"
         .endif
     .endif
@@ -1500,7 +1511,7 @@
 ; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
     
 .macro ___checkForTailJMP knownFlagStatus
-    .ifdef ::_CUSTOM_SYNTAX_
+    .ifdef ::_CUSTOM_SYNTAX_        
         .if .xmatch( knownFlagStatus, jmp)
             .if _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0
                 .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) = *, warning, "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
@@ -1508,7 +1519,7 @@
                 .warning "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
             .endif
         .else
-            .if _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0
+            .if ( _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0 ) && ( ::__WARNING_LEVEL__ > 0 )
                 .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) <> *, warning, "JMP before ELSE/ELSEIF. Suggested: use 'jmp' option. eg: elseif (condition) , jmp"
             .endif
         .endif
@@ -1685,7 +1696,7 @@
     stackPush "DO_WHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
     .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
-    ___pushCurrentBreakType DOWHILE
+    ___pushLoopType "DOWHILE"
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1713,7 +1724,7 @@
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
         if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
-        ___popCurrentBreakType
+        ___popLoopType
         ___generateBreakLabel
     .endif
 .endmacro
@@ -1753,7 +1764,7 @@
     if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
-    ___popCurrentBreakType
+    ___popLoopType
     ___generateBreakLabel
 .endmacro
 
@@ -1771,7 +1782,7 @@
 ;   <do>, <while>, <repeat>, <until>
 
 .macro while_do condition, branchtype
-    ___pushCurrentBreakType WHILEDO
+    ___pushLoopType "WHILEDO"
     stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
@@ -1812,12 +1823,12 @@
         jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
     .endif
     .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
-    ___popCurrentBreakType
+    ___popLoopType
     ___generateBreakLabel
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: ___pushCurrentBreakType
+; Function: ___pushLoopType
 ;
 ; Keep track of the current type of loop for generating breaks.
 ;
@@ -1828,22 +1839,22 @@
 ;   FOR
 ;   SWITCH 
 
-.macro ___pushCurrentBreakType breakType
-    pushTokenList "BREAK_TYPE", breakType
+.macro ___pushLoopType loopType
+    pushTokenList "LOOP_TYPE", loopType
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: ___popCurrentBreakType
+; Function: ___popLoopType
 ;
 ; Retrive the current loop type
 ;
 
-.macro ___popCurrentBreakType 
-    popTokenList "BREAK_TYPE"
+.macro ___popLoopType 
+    popTokenList "LOOP_TYPE"
     .if FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED
-        .undefine ___breakTypeStackName
+        .undefine ___loopType
     .endif
-    .define ___breakTypeStackName poppedTokenList
+    .define ___loopType poppedTokenList
     FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED .set 1
 .endmacro
     
@@ -1867,8 +1878,6 @@
     .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0 && switchCount < 0
         ___error "Invalid 'break'."
     .endif
-    ___popCurrentBreakType
-    ___pushCurrentBreakType ___breakTypeStackName
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1883,15 +1892,18 @@
 
 .macro break knownFlagStatus
     ___verifyBreakInsideLoop
-    .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName)))
+    ; peek at stack:
+    ___popLoopType
+    ___pushLoopType ___loopType
+    .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", ___loopType))
     .ifnblank knownFlagStatus
         setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), FLOW_CONTROL_VALUES::___breakStatementCounter))
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
         ___clearBranchSet
     .else
-        jmp .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), FLOW_CONTROL_VALUES::___breakStatementCounter))
+        jmp .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
     .endif
-    stackPush .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)), FLOW_CONTROL_VALUES::___breakStatementCounter
+    stackPush .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType), FLOW_CONTROL_VALUES::___breakStatementCounter
     .undefine ___breakStatementCounter
 .endmacro
 
@@ -1908,17 +1920,17 @@
 
 .macro ___generateBreakLabel checkMoreBreakStatements
     .local _BREAK_STATEMENT_COUNT
-    stackPeek .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT  
+    stackPeek .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT  
     .ifnblank checkMoreBreakStatements  ; recursive call to pop stack of any matching break statements
         .if _BREAK_STATEMENT_COUNT = checkMoreBreakStatements
-            stackPop .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT
+            stackPop .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT
             ___generateBreakLabel _BREAK_STATEMENT_COUNT
         .endif
     .elseif _BREAK_STATEMENT_COUNT >= 0
-        stackPop .sprintf("BREAK_STATEMENT_STACK_%s", .string(___breakTypeStackName)) , _BREAK_STATEMENT_COUNT
-        .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", .string(___breakTypeStackName), _BREAK_STATEMENT_COUNT)):
+        stackPop .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT
+        .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, _BREAK_STATEMENT_COUNT)):
         ___generateBreakLabel _BREAK_STATEMENT_COUNT
-        FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName))) .set FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", .string(___breakTypeStackName))) + 1
+        FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) .set FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) + 1
     .endif
 .endmacro
 
@@ -1959,7 +1971,7 @@
     .endif
     .define COND () ( condition )
     ; --------------------------------------------------------------------------------------------
-    ___pushCurrentBreakType FOR
+    ___pushLoopType "FOR"
     ; execute the INIT, before the loop
     ___evaluateStatementList {INIT}
     
@@ -2003,7 +2015,7 @@
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
-    ___popCurrentBreakType
+    ___popLoopType
     ___generateBreakLabel
 .endmacro
 
@@ -2042,7 +2054,7 @@
 .macro switch reg, mode
 
     .local gotoMode
-    ___pushCurrentBreakType SWITCH
+    ___pushLoopType "SWITCH"
     .ifnblank mode
         .if .xmatch( {mode}, goto )
             gotoMode = 1
@@ -2086,7 +2098,9 @@
         .endif
     .endif
     
-    .warning .sprintf( "INFO: Switch: Register A value changed for switch. Register %s loaded/changed to index data for switch.", SWITCH_INFO_REG)
+    .if ::__WARNING_LEVEL__ > 1
+        .warning .sprintf( "INFO: Switch: Register A value changed for switch. Register %s loaded/changed to index data for switch.", SWITCH_INFO_REG)
+    .endif
     
     .if !gotoMode
         .local loop, found
@@ -2212,7 +2226,9 @@
     ; goto option not used:    
     .else
         .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) && (!.defined(.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))))
-            .warning "Use 'goto' mode with this case structure. Case values start at zero and increment. eg: switch <value>, goto"
+            .if ::__WARNING_LEVEL__ > 0
+                .warning "Use 'goto' mode with this case structure. Case values start at zero and increment. eg: switch <value>, goto"
+            .endif
         .endif
     .endif
     
@@ -2259,7 +2275,7 @@
     .ifndef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
         .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
     .endif
-    ___popCurrentBreakType
+    ___popLoopType
     ___generateBreakLabel
 .endmacro
 
