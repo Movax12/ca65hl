@@ -676,7 +676,7 @@ enclosing **if**  in a nested **if** statement. Example:
     endif
     
 The macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
-If **__CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
+If **\_\_CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
 
 ### Optimizing tail call JMP before an **else** or **elseif** - jmp
     
@@ -693,15 +693,15 @@ Example:
         jmp doPause
     endif
 
-If **_CUSTOM_SYNTAX_** is non-zero, the macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
-If **_CUSTOM_SYNTAX_** is non-zero, and **__CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
-If **_CUSTOM_SYNTAX_** is zero, this option can be used, but the macro code will not be able to verify its use.
+If **\_CUSTOM_SYNTAX_** is non-zero, the macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
+If **\_CUSTOM_SYNTAX_** is non-zero, and **\_\_CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
+If **\_CUSTOM_SYNTAX_** is zero, this option can be used, but the macro code will not be able to verify its use.
 
 ## Warnings
 
 The macros in this package attempt to give helpful error messages and warnings about how to use them. 
 Warnings will remind about register overwrites or other code generation that might not be obvious and could possibly 
-cause bugs in some cases. The identifier **__CA65HL_WARNING_LEVEL__** can be set from 0 to 2 to offer warnings about 
+cause bugs in some cases. The identifier **\_\_CA65HL_WARNING_LEVEL__** can be set from 0 to 2 to offer warnings about 
 some changes to registers or other changes to the state of the CPU that may not be obvious firsthand.
 Important errors or warnings will not be suppressed.
 
