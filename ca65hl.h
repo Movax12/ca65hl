@@ -76,10 +76,6 @@
 .endif
 
 ; --------------------------------------------------------------------------------------------
-; define this so breaks work okay the first time: (value doesn't matter)
-.define ___loopType NULL
-
-; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
 ; 'set' or 'clear' can be added after keywords when in use.
 ; 'set' will have no effect, 'clear' will invert the flag.
@@ -1846,7 +1842,7 @@
 ; --------------------------------------------------------------------------------------------
 ; Function: ___popLoopType
 ;
-; Retrive the current loop type
+; Retrieve the current loop type
 ;
 
 .macro ___popLoopType 
@@ -1912,6 +1908,7 @@
 ;
 ; Invoked at the end of a loop macro to check if any labels
 ; need to be created for a break command from inside that loop.
+; Loop type should be popped into __loopType with ___popLoopType before this is called.
 ;
 ; Parameters:
 ;   checkMoreBreakStatements - used in recursion to pop any duplicate break values 
