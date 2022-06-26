@@ -302,7 +302,7 @@ passes. (If not inside a loop, it will generate an error.)
 
 There are two macros that are included as a part of this package that
 allow some more features. One is an comparison macro. The other is
-primary for assignment, or moving a byte value through some steps
+primarily for assignment, or moving a byte value through some steps
 including loading and storing.
 
 ### Comparison Macro
@@ -404,8 +404,13 @@ the assembler:
 
 ### Extended Syntax
 
-As well, when using **mb**, you can use an alternate syntax for indexing
-values. For example:
+In the file **ca65hl.h** there is an check for the global identifier
+**_CA65HL_USE_CUSTOM_SYNTAX_** If it is not defined or defined as a non-zero 
+value, **customSyntax.h** will be included in the source. This file enables
+an optional syntax for 6502 assembly that allows offsets and indexed opcodes 
+to be written like arrays.
+
+For example:
 
     ; traditional assembly:
     lda foo + 3
@@ -439,7 +444,7 @@ Examples:
         ; if all bits match do code
     endif
 
-The indexed sytax can also be used:
+The array syntax can also be used:
 
     if ( foo[ x + 3 ] >= #1 )
         ; 
@@ -450,11 +455,6 @@ The indexed sytax can also be used:
     endif
 
 ## Loop Structures
-
-There are two main kinds of loops: 
-**do**…​**while &lt;condition&gt;**
-and 
-**while &lt;condition&gt; do**…​**endwhile.**
 
 #### The do…while loop
 
@@ -502,14 +502,14 @@ A **JMP** instruction is used to loop at **endwhile**.
 
 #### For Loop
 
-A C-style for loop
+A C-style for loop.
 
 Usage:
 `for ( <init>, <condition>, <increment> ), strict`
 
-This macro requires brackets around a comma separated list of for init, condition and increment valuies. 
+This macro requires brackets around a comma separated list of for init, condition and increment values. 
 Values for <init> and <increment> can be any amount of instructions separated by ':' and are both optional. 
-The <condition> can be anything that follows conditional expression syntax for IF. The end of the code block for the 
+The <condition> can be anything that follows conditional expression syntax. The end of the code block for the 
 loop is defined by `next`
 
 Note: Code for <init> will always be executed. If any value is passed for <strict> the loop will only be 
@@ -610,7 +610,8 @@ a JMP command to skip the data tables. Example:
     
     endswitch
 
-The previous example has ordered cases starting at zero. In this case, add the **goto** option to jump to the matching case without evlauation a match:
+The previous example has ordered cases starting at zero. In this case, add 
+the **goto** option to jump to the matching case without searching for a match:
 
     setSwitchStatementDataSeg "RODATA"
     switch index, goto
@@ -649,5 +650,60 @@ The previous example has ordered cases starting at zero. In this case, add the *
             break
     
     endswitch
+    
+## Other Optimizations
+
+In the examples for **else** and **elseif**, it was show that an known flag status can be passed by the
+programmer to optimize the branch from a **JMP** instruction to a branch. The **if**, **else** and **elseif** 
+macros can also be optimized slightly further with two more optional annotations:
+
+### Chaining the **endif** Statement - chain
+
+When using **if** the option **chain** can be added as a parameter to branch to the **endif** of an
+enclosing **if**  in a nested **if** statement. Example:
+
+    if ( controller & #BUTTON_UP )
+        dec cursorIndex
+        if ( negative ), chain              ; When positive, branch to the endif of the enclosing if statement
+            inc cursorIndex
+        endif
+    elseif ( controller & #BUTTON_DOWN )
+        if ( cursorIndex < #7 ) ,chain      ; When value is 7 or greater, branch to the endif of the enclosing if statement
+            inc cursorIndex
+        endif
+    elseif ( controller & #BUTTON_START ) 
+        jmp doPause
+    endif
+    
+The macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
+If **__CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
+
+### Optimizing tail call JMP before an **else** or **elseif** - jmp
+    
+When using **else** or **elseif** the option **jmp** can be added as a parameter if the last instruction before the 
+**else** or **elseif** is a **JMP** and it is known that the implied **JMP** or branch before the
+**else** or **elseif** will never be executed.
+Example:
+
+    if ( controller & #BUTTON_UP )
+        jmp doControllerUp
+    elseif ( controller & #BUTTON_DOWN ), jmp       ; suppress output of the JMP to the endif
+        jmp doControllerDown
+    elseif ( controller & #BUTTON_START ), jmp      ; suppress output of the JMP to the endif
+        jmp doPause
+    endif
+
+If **_CUSTOM_SYNTAX_** is non-zero, the macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
+If **_CUSTOM_SYNTAX_** is non-zero, and **__CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
+If **_CUSTOM_SYNTAX_** is zero, this option can be used, but the macro code will not be able to verify its use.
+
+## Warnings
+
+The macros in this package attempt to give helpful error messages and warnings about how to use them. 
+Warnings will remind about register overwrites or other code generation that might not be obvious and could possibly 
+cause bugs in some cases. The identifier **__CA65HL_WARNING_LEVEL__** can be set from 0 to 2 to offer warnings about 
+some changes to registers or other changes to the state of the CPU that may not be obvious firsthand.
+Important errors or warnings will not be suppressed.
+
 
 END
