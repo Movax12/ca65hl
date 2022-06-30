@@ -54,8 +54,8 @@
 .endif
 
 ; Warn in some cases if turned on:
-.ifndef ::__WARNING_LEVEL__
-    ::__WARNING_LEVEL__ = 0
+.ifndef ::__CA65HL_WARNING_LEVEL__
+    ::__CA65HL_WARNING_LEVEL__ = 0
 .endif
 
 ; --------------------------------------------------------------------------------------------
@@ -659,11 +659,11 @@
     .define _RIGHT_EXP .mid(pos1 + 1 + carryOp, tcount - pos1 - 1 - carryOp, {exp})
     
     ; override register to A if the following:
-    .if tcount > 1 && ( reg = ___math::REGX || reg = ___math::REGY ) && ( op1 > 2 || (!.match(_RIGHT_EXP, 1)) )  ; ADD and SUB are 1, 2
+    .if ( op1 > 2 ) || ( op1 <= 2 && (.match(.left(1,_RIGHT_EXP), 1)))  ; ADD and SUB are 1, 2
         reg .set ___math::REGA
     .endif
     
-     .if reg = ___math::REGA
+    .if reg = ___math::REGA
         .define _LOAD lda
     .elseif reg = ___math::REGX
         .define _LOAD ldx
@@ -1046,7 +1046,7 @@
 ; (inside a loop) and branch to the next break label. If no 'goto' or 'break', it will branch to 
 ; the next ENDIF (or ELSE, or ELSEIF) on an inverted condition.
 
-.macro if condition, opt1, opt2
+.macro if condition, opt0, opt1
     
     printTokenListDebug {Branch_Statement: condition}
     ; --------------------------------------------------------------------------------------------
@@ -1119,39 +1119,27 @@
     FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE .set 1
     FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT .set -1       ; -1 means invalid. only valid after an ENDIF macro
     
-    ; check options, in any order. Note: no way to make this a loop - opt1, opt2 must be referenced directly
-    .ifnblank opt1
-        .if .xmatch( opt1, long ) || .xmatch( opt1, short )
-            .if useLongJump = -1
-                .if .xmatch( opt1, long )
-                    useLongJump .set 1
+    ; check additional parameters as options in any order:
+    .define _IF_OPT0_ opt0
+    .define _IF_OPT1_ opt1
+    .repeat 2, i
+        .ifnblank .left(1, .ident(.sprintf("_IF_OPT%d_", i)))
+            .if .xmatch( .left(1, .ident(.sprintf("_IF_OPT%d_", i))) , long) || .xmatch( .left(1, .ident(.sprintf("_IF_OPT%d_", i))) , short)
+                .if useLongJump = -1
+                    useLongJump .set .xmatch( .left(1, .ident(.sprintf("_IF_OPT%d_", i))) , long)
                 .else
-                    useLongJump .set 0
-                .endif
-            .endif
-        .elseif .xmatch( opt1, chain )
-            chainedFlag .set 1
-        .else
-            ___error "Invalid option. Valid options are 'chain', or one of 'long', 'short'."
-        .endif
-    .endif
-    .ifnblank opt2
-        .if .xmatch( opt2, long ) || .xmatch( opt2, short )
-            .if useLongJump = -1
-                .if .xmatch( opt2, long )
-                    useLongJump .set 1
-                .else
-                    useLongJump .set 0
-                .endif
+                    ___error "Option already set."
+                .endif    
+            .elseif .xmatch( .left(1, .ident(.sprintf("_IF_OPT%d_", i))) , chain)
+                chainedFlag .set 1
             .else
-                __error "Duplicate option."
+                ___error "Invalid option. Valid options are 'chain', or one of 'long', 'short'."
             .endif
-        .elseif .xmatch( opt2, chain )
-            chainedFlag .set 1
-        .else
-            ___error "Invalid option. Valid options are 'chain', or one of 'long', 'short'."
         .endif
-    .endif
+    .endrepeat
+    .undefine _IF_OPT0_
+    .undefine _IF_OPT1_
+    
     ; no long jump option passed, use setLongBranch setting:
     .if useLongJump = -1
         useLongJump .set FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
@@ -1435,13 +1423,13 @@
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
             ; if destinationLabel is defined it means this is a branch to a lower address
             .ifdef destinationLabel
-                .define longJumpAssert longJumpLabel - destinationLabel > 128
+                .define longJumpAssert() longJumpLabel - destinationLabel > 128
             .else ; a branch to a higher address:
                 .ifndef firstBranchToLongJump
                     firstBranchToLongJump = longJumpLabel
                 .endif
                 ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
-                .define longJumpAssert destinationLabel - firstBranchToLongJump - 3 > 127
+                .define longJumpAssert() destinationLabel - firstBranchToLongJump - 3 > 127
             .endif
             .assert longJumpAssert, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
             .undefine longJumpAssert
@@ -1488,7 +1476,7 @@
         stackPop "IF_STATEMENT_CHAIN_NEXT_ENDIF", ENCLOSING_IF_STATEMENT_COUNT  ; pop, ignore if invalid stack, it will just fail this test:
         .if ENCLOSING_IF_STATEMENT_COUNT = _IF_STATEMENT_COUNT
             .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) = *, error, "Invalid chain option used." ; address must match last ENDIF
-        .elseif ::__WARNING_LEVEL__ > 0
+        .elseif ::__CA65HL_WARNING_LEVEL__ > 0
             .assert .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT )) <> *, warning, "To optimize branch generation, apply chain to previous IF statement. eg: if (condition) , chain"
         .endif
     .endif
@@ -1515,7 +1503,7 @@
                 .warning "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
             .endif
         .else
-            .if ( _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0 ) && ( ::__WARNING_LEVEL__ > 0 )
+            .if ( _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0 ) && ( ::__CA65HL_WARNING_LEVEL__ > 0 )
                 .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) <> *, warning, "JMP before ELSE/ELSEIF. Suggested: use 'jmp' option. eg: elseif (condition) , jmp"
             .endif
         .endif
@@ -1536,9 +1524,14 @@
 ;   See Also:
 ;   <setBranch>, <endif>, <if>, <else>
 
-.macro elseif condition, knownFlagStatus, branchtype
+.macro elseif condition, opt0, opt1
 
     .local IF_STATEMENT_COUNT
+    .local useLongJump ; not used, other than to check for repeated use in options, possible future use
+    .local knownFlagStatusOptionNumber
+    
+    useLongJump  .set -1
+    knownFlagStatusOptionNumber .set -1
     
     stackPeek "IF_STATEMENT_STACK", IF_STATEMENT_COUNT ; just look, don't touch
     .if IF_STATEMENT_COUNT < 0 
@@ -1547,6 +1540,38 @@
     
     .ifdef .ident( .sprintf( "_IF_STATEMENT_ELSE_%04X_DEFINED", IF_STATEMENT_COUNT ))
         ___error "Not allowed: 'elseif' after 'else'."
+    .endif
+    
+    ; check additional parameters as options in any order:
+    ; (figure out which option is for knownFlagStatus)
+    .define _ELSEIF_OPT0_ opt0
+    .define _ELSEIF_OPT1_ opt1
+    .repeat 2, i
+        .ifnblank .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", i)))
+            .if .xmatch( .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", i))) , long) || .xmatch( .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", i))) , short)
+                .if knownFlagStatusOptionNumber = -1
+                    knownFlagStatusOptionNumber .set !i
+                .endif
+                .if useLongJump = -1
+                    useLongJump .set .xmatch( .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", i))) , long)
+                .else
+                    ___error "Option already set."
+                .endif    
+            .else
+                .if knownFlagStatusOptionNumber = -1
+                    knownFlagStatusOptionNumber .set i
+                .endif
+            .endif
+        .endif
+    .endrepeat
+    
+    ; if something found, define the options:
+    .if knownFlagStatusOptionNumber <> -1
+        .define knownFlagStatus()   .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", knownFlagStatusOptionNumber)))
+        .define branchtype()        .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", !knownFlagStatusOptionNumber)))
+    .else
+        .define knownFlagStatus
+        .define branchtype
     .endif
     
     ___verifyChain IF_STATEMENT_COUNT
@@ -1584,8 +1609,11 @@
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     
-    .undefine ELSE_IF_COUNT 
-    
+    .undefine ELSE_IF_COUNT
+    .undefine _ELSEIF_OPT0_
+    .undefine _ELSEIF_OPT1_    
+    .undefine knownFlagStatus
+    .undefine branchtype     
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1858,7 +1886,7 @@
 ; --------------------------------------------------------------------------------------------
 ; Function: ___verifyBreakInsideLoop
 ;
-; Verify break is being invoked from within a loop.
+; Verify break is being invoked from within a loop or structure that allows break.
 ;
 ; Parameters: none
 
@@ -2095,7 +2123,7 @@
         .endif
     .endif
     
-    .if ::__WARNING_LEVEL__ > 1
+    .if ::__CA65HL_WARNING_LEVEL__ > 1
         .warning .sprintf( "INFO: Switch: Register A value changed for switch. Register %s loaded/changed to index data for switch.", SWITCH_INFO_REG)
     .endif
     
@@ -2223,7 +2251,7 @@
     ; goto option not used:    
     .else
         .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_START_ZERO_INCREMENTED", SWITCH_STATEMENT_COUNTER)) && (!.defined(.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))))
-            .if ::__WARNING_LEVEL__ > 0
+            .if ::__CA65HL_WARNING_LEVEL__ > 0
                 .warning "Use 'goto' mode with this case structure. Case values start at zero and increment. eg: switch <value>, goto"
             .endif
         .endif
