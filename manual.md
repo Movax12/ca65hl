@@ -9,32 +9,35 @@ syntax and functionality of the assembler. At this point it is targeted
 for compatibility with the NMOS 6502; code output will not use more
 advanced features of the 65c02 or higher. All macro code corresponds
 directly to underlying assembly and all assembly code can still be
-controlled directly in almost every case. The macros have no ability to
-optimize based on the previous code used; the programmer/developer must
+controlled directly in almost every case. The macros have almost no ability 
+to optimize code based on the previous code used; the programmer/developer must
 be aware of what optimizations are available.
 
-The main feature is **if** flow control. The **if** statement logic is
-based on 6502 CPU flags and branch statements, not an evaluation of a
-Boolean expressions. Loop statements are essentially the same thing and
-use the same macro code.
+Most macros output minimal code. The `switch` statement is somewhat 
+of an exception, as it will generate a table of data as a jump table.
+
+The main feature is flow control. The `if` statement logic is
+based on 6502 CPU flags and branch statements, not an evaluation of Boolean 
+expressions. Loop statements are essentially a convenient way to use `if` 
+statements without having to name labels.
 
 ## Conditional Expressions
 
-The **if** statement and looping macros generate branch instructions
+The `if` statement and looping macros generate branch instructions
 based on the condition passed. In the simplest form they expect an
-expression of both a 6502 flag name as a single uppercase character: **C
-Z N V** or **G**. Followed by **set** or **clear**. Due to this, one
-should avoid using **C Z N V G** or **set** or **clear** as identifiers.
-(**G** represents 'greater than', but this should be avoided where
-possible due to it requiring two branch instructions to evaluate.) The
-**set** or **clear** are not required. If omitted, the flag will be
-processed as if **set** was used. If **clear** is used the branch for
-the flag will be inverted.
+expression of both a 6502 flag name as a single uppercase character: 
+`C Z N V` or `G`. Followed by `set` or `clear`. Due to this, 
+`C Z N V G` or `set` or `clear` should not be used as identifiers.
+`G` represents 'greater than', but this should be avoided where
+possible due to it requiring two branch instructions to evaluate. The
+`set` or `clear` are not required. If omitted, the flag will be
+processed as if `set` was used. If `clear` is used the branch will be 
+inverted.
 
 In the simplest use in an if statement:
 
     if (C set)
-    ; do code here if C flag is set
+        ; do code here if C flag is set
     endif
 
 Conditions are required to be enclosed in parenthesis.
@@ -46,8 +49,8 @@ Also accepted: Any number of negate signs in front of the condition:
     endif
 
 Using the [C-style macros](https://cc65.github.io/doc/ca65.html#ss12.7)
-in ca65, it’s trivial to setup (the included) alternative flag names. When in
-use in a statement, these defines can be followed by **set** or **clear**:
+in ca65, there are alternative flag names included. When in
+use in a statement, these defines can be followed by `set` or `clear`:
 
     .define less               !C
     .define greaterORequal      C
@@ -68,7 +71,7 @@ use in a statement, these defines can be followed by **set** or **clear**:
 Example:
 
     if (carry set || equal)
-    ; do code here if C flag or Z flag is set
+        ; do code here if C flag or Z flag is set
     endif
 
 ### Macro "Functions" and Inline Code Expressions
@@ -76,45 +79,45 @@ Example:
 If the expression does not match a flag definition as described above,
 and is not an identifier (variable), the macro will attempt to execute
 the passed value as a macro or instruction. If you have defined a macro
-to be called in this way, it can invoke the macro **setBranch** which
+to be called in this way, it can invoke the macro `setBranch` which
 should be followed by a valid flag definition.
 
 Example:
 
     .macro regNegative reg
-      .if .xmatch(reg,a)
-        cmp #0
-     .elseif .xmatch(reg,x)
-        cpy #0
-     .elseif .xmatch(reg,y)
-        cpx #0
-     .else
-       .error "No register passed."
-     .endif
-      setBranch N set        ; tell the conditional statement to test the N flag.
-    .endmacro                ; when using this macro, 'N set' could be thought of as true, N clear as false.
+        .if .xmatch(reg,a)
+            cmp #0
+        .elseif .xmatch(reg,x)
+            cpy #0
+        .elseif .xmatch(reg,y)
+            cpx #0
+        .else
+            .error "No register passed."
+        .endif
+        setBranch N set        ; tell the conditional statement to test the N flag.
+    .endmacro                  ; when using this macro, `N set` could be thought of as true, `N clear` as false.
 
-The macro defines which CPU flag to test and can then be used in the **if** statement:
+The macro defines which CPU flag to test and can then be used in the `if` statement:
 
     if (regNegative a)
         ;code
     endif
 
 As well, assembly code can be used to determine the condition, with any
-number of assembly statements and macros separated by colons. If **setBranch** is 
+number of assembly statements and macros separated by colons. If `setBranch` is 
 not used to define the CPU flag, a double equal (==) or not equal (!=) followed 
 by the flag to be tested can be used. The latter will invert the flag to be tested. 
 
 Example:
 
     if ( lda foo : tay : dey == zero )
-    ; do code if foo is equal to 1
+        ; do code if foo is equal to 1
     endif
 
 Another Example:
 
     if ( jsr inRange == C set )
-     ; do stuff if in range
+        ; do stuff if in range
     endif
 
 Using this method of defining a branch, could be thought of as "If
@@ -124,8 +127,8 @@ TRUE."
 ### Logical AND/OR Support
 
 All conditional statements support logical AND and OR in the the
-expression, with the default operators **&&** and **||** (which will
-also match **.and** and **.or** tokens in ca65.)
+expression, with the default operators `&&` and `||` (which will
+also match `.and` and `.or` tokens in ca65.)
 
 Example:
 
@@ -153,18 +156,18 @@ Example:
 
     if (mySuperCoolMacro foo && bar) goto myLabel
 
-In this example, the macro, **mySuperCoolMacro**, requires the '&&' to
-be passed. This will be parsed by the **if** and cause an error. To work
+In this example, the macro, `mySuperCoolMacro`, requires the '&&' to
+be passed. This will be parsed by the `if` and cause an error. To work
 around this:
 
     if (mySuperCoolMacro(foo && bar)) goto myLabel
 
 The macro will have to check for, and remove any parentheses, but the &&
-will be ignored by the **if** macro.
+will be ignored by the `if` macro.
 
 ### Braces (Curly Brackets)
 
-Curly braces should be used to enclose the entire parameter line if
+Curly braces should be used to enclose the entire parameter if
 including any commas for any reason, such as an inline index
 instruction:
 
@@ -175,38 +178,38 @@ instruction:
 ### Implied Register Loading and Expression Evaluation
 
 If a condition references an identifier alone, the macro code will
-default to using the accumulator to load the identifier via a **lda**
+default to using the accumulator to load the identifier via a `lda`
 instruction. As well, if no flag is specified with either the double
-equal (==), not equal (!=) or **setBranch**, and the macro has found
+equal (`==`), not equal (`!=`) or `setBranch`, and the macro has found
 what seems to be valid assembly code or an identifier, it will default
-to using **Z clear** to simulate a non-zero result as true.
+to using `Z clear` to simulate a non-zero result as true.
 
 Example:
 
     if (myFlag)        ; myFlag is a variable, it gets loaded into reg A, and is evaluated as true if it is non-zero
-    ; myFlag code
+        ; myFlag code
     endif
 
     ; this will generate the same code as above:
     if (lda myFlag != zero)
-    ; my Flag code
+        ; my Flag code
     endif
 
 ### Inverting logic
 
-The 'not' operator is **.not** or **!**. An individual condition, or 
+The 'not' operator is `.not` or `!`. An individual condition, or 
 an entire parentheses set can be negated:
 
     if (!myFlag)
-    ; Don't do this unless the flag is clear/false
+        ; Don't do this unless the flag is zero/false
     endif
 
     ; this will generate the same code as above:
     if (lda myFlag == zero)
-    ; my Flag code
+        ; my Flag code
     endif
 
-These two **if** statements generate equivalent code:
+These two `if` statements generate equivalent code:
 
     if ( C set || N set || V set)
         ; code
@@ -218,13 +221,13 @@ These two **if** statements generate equivalent code:
 
 ## If Statement
 
-There are two kinds of **if** statements: An **if** statement starting a 
-block of code and a stand alone **if** statement.
+There are two kinds of `if` statements: An `if` statement starting a 
+block of code and a stand alone `if` statement.
 
 #### If Statement with Code Block
 
 This is very similar to most high level programming syntax. The keywords
-to create a block are: **if**, **else**, **elseif**, **endif**.
+to create a block are: `if`, `else`, `elseif`, `endif`.
 
     if <condition>
         ; execute here if true
@@ -232,10 +235,10 @@ to create a block are: **if**, **else**, **elseif**, **endif**.
         ; execute here if false
     endif
 
-The **if** statement will generate appropriate branches depending on the
-condition(s). The **else** or **elseif** statement generates a **JMP**
-instruction to the end of the if block. If a CPU flag can be known to
-always be set/clear when the **else** or **elseif** is encountered you
+The `if` statement will generate appropriate branches depending on the
+condition(s). The `else` or `elseif` statement generates a `JMP`
+instruction to the `endif` of the if block. If a CPU flag can be known to
+always be set/clear when the `else` or `elseif` is encountered you
 can tell it to branch on that condition instead, using that known state:
 
     if <condition>
@@ -245,7 +248,7 @@ can tell it to branch on that condition instead, using that known state:
         ;execute here if false
     endif
 
-With **elseif**:
+With `elseif`:
 
     if <condition>
         ; execute here if true
@@ -255,19 +258,18 @@ With **elseif**:
     endif
 
 For greatest compatibility, only pass the single letter flag, with an 
-optional 'set or 'clear' with **else** or **elseif**.
+optional 'set or 'clear' with `else` or `elseif`.
 
 ## Long branches:
 
-By default, the if macro will generate appropriate branch opcodes. If
+By default, the `if` macro will generate appropriate branch opcodes. If
 the branch is too far away ca65 will generate an error. The macro
-command **setLongBranch** can be used:
+command `setLongBranch` can be used:
 
     setLongBranch +     ; use JMP instruction to branch
     setLongBranch -     ; use branch instructions only
 
 Or:
-
 
     setLongBranch on    ; use JMP instruction to branch
     setLongBranch off   ; use branch instructions only
@@ -276,26 +278,28 @@ Or:
 There is also a feature to indicate at link if the long branch was not
 needed:
 
-    setLongBranch +, +    ; if a code block is less than 127 bytes, the linker will say that a long branch is not needed here
-    setLongBranch +, -    ; don't warn about code blocks less than 127 bytes
+    setLongBranch +, +    ; if a `jmp` is not needed, the linker will output a warning that a long branch is not needed here
+    setLongBranch +, -    ; don't warn about long branches
 
-The **if** macro can also accept an optional **long** or **short** parameter:
+The `if` macro can also accept an optional `long` or `short` parameter:
 
     if <condition>, long  ; use JMP instruction to branch, regardless of setLongBranch setting
-    if <condition>, short ; use branch instruction to branch, regardless of setLongBranch setting
+    if <condition>, short ; use branch instructions to branch, regardless of setLongBranch setting
+    
+Due to the one-pass nature of ca65, it is not possible to do this automatically.
 
-#### If Statement with **goto** or **break**
+#### If Statement with `goto` or `break`
 
     if <condition> goto userLabel
     if <condition> break
 
-If the statement ends with a **break** or **goto** it will be evaluated
-as a statement on its own and there is no corresponding **endif**.
+If the statement ends with a `break` or `goto` it will be evaluated
+as a statement on its own and there is no corresponding `endif`.
 
-When using **goto**, a label name should immediately follow. The macro will
-generate a branch to this label. Long branching works here as well.
+When using `goto`, a label name should immediately follow. The macro will
+generate a branch to this label. Long branches work here as well.
 
-When using **break**, the current loop will be exited if the condition
+When using `break`, the current loop will be exited if the condition
 passes. (If not inside a loop, it will generate an error.)
 
 ## Integrated Macros
@@ -316,14 +320,14 @@ Designed to be used inline with a conditional expression. For example:
 
 Here, the a macro is called (expanded). It generates a small amount of
 code for the comparison of the accumulator to the constant. (In this
-case **cmp \#$F0**). It then sets the flag condition to C set. If a
+case `cmp \#$F0`). It then sets the flag condition to C set. If a
 recognized identifier is found, so this also will work:
 
     if ( height >= #$F0 )
         ; too high code
     endif
 
-Valid comparison operators: **= &lt;&gt;, &gt;, &lt;, &gt;=, <=**
+Valid comparison operators: `= &lt;&gt;, &gt;, &lt;, &gt;=, <=`
 
 If you wish to use another register:
 
@@ -339,15 +343,15 @@ If you wish to use another register:
         ; too high code
     endif
 
-### Macro **mb**
+### Macro `mb`
 
-The **mb** macro is designed to make moving byte values and performing
+The `mb` macro is designed to make moving byte values and performing
 byte operations easier, with a bit of higher level syntax. Used alone,
-it requires an assignment operator:
+it requires an assignment operator.
 
     mb a := foo
 
-This would output the expected: **lda foo**
+This would output the expected: `lda foo`
 
 The macro tries to determines what instructions to generate for the
 commands/values is on the right side of an assignment and assign it to
@@ -360,7 +364,7 @@ So, foo and bar can both be either a 6502 register or memory address
 
     mb x := a
 
-It will output a **tax** instruction. The left side is limited to a
+It will output a `tax` instruction. The left side is limited to a
 memory address or register, but the right side can also be a simple
 expression, using a single register.
 
@@ -368,10 +372,10 @@ expression, using a single register.
 
 The macro will determine right side is going to have to use the
 accumulator due to the operators, output the correct code ending with a
-**tax**. If the assignment was the accumulator, there would be no output
+`tax`. If the assignment was the accumulator, there would be no output
 for the assignment (since the accumulator is already holding the
-result). **Evaluation is limited to simply scanning from left to
-right**, there is no implied or explicit precedence.
+result). **Evaluation is limited to simply scanning from left to right**, 
+there is no implied or explicit precedence.
 
 If you have two variable names and no indication of the register to use,
 the default is to use the accumulator. This can be overridden as:
@@ -404,16 +408,18 @@ the assembler:
 
 ### Extended Syntax
 
-In the file **ca65hl.h** there is an check for the global identifier
-**_CA65HL_USE_CUSTOM_SYNTAX_** If it is not defined or defined as a non-zero 
-value, **customSyntax.h** will be included in the source. This file enables
+In the file `ca65hl.h` there is an check for the global identifier
+`_CA65HL_USE_CUSTOM_SYNTAX_` If it is not defined or defined as a non-zero 
+value, `customSyntax.h` will be included in the source. This file enables
 an optional syntax for 6502 assembly that allows offsets and indexed opcodes 
 to be written like arrays.
 
 For example:
 
     ; traditional assembly:
-    lda foo + 3
+    lda foo + 3 
+    ; customSyntax.h included:
+    lda foo[ 3 ]
     ; mb macro:
     mb a := foo[ 3 ]
 
@@ -421,13 +427,15 @@ You can also index with x, or y as allowed by the 6502 instruction set:
 
     ; traditional assembly:
     lda foo + 3, y
+    ; customSyntax.h included:
+    lda foo[ y + 3 ]
     ; mb macro:
-    mb a := foo[ 3 + y ]
+    mb a := foo[ y + 3 ]
 
 ### Integration Into Conditional Expression Evaluation
 
 When processing a conditional statement, if the statement doesn’t match
-an instruction, macro and any of the operators supported by the **mb** macro are found,
+an instruction, macro and any of the operators supported by the `mb` macro are found,
 they will be evaluated.
 
 Examples:
@@ -469,8 +477,8 @@ Loop while the condition is true:
     while (!equal)
 
 This can also use a slightly different syntax with the keywords
-**repeat** and **until**. These are the same, except that the **until**
-negates the condition at the end:
+`repeat` and `until`. These are based on the same macros, but the 
+`until` negates the condition at the end:
 
     ldx #$00
     repeat                ; loop from x = 0 to 15
@@ -492,7 +500,7 @@ example:
 #### The while - do...endwhile
 
 This is a loop that is started with a condition.
-A **JMP** instruction is used to loop at **endwhile**.
+A `JMP` instruction is used to loop at `endwhile`.
 
     ldx #$00
     while (inx : x < #$10) do       ; loop from x = 1 to 15
@@ -505,16 +513,19 @@ A **JMP** instruction is used to loop at **endwhile**.
 A C-style for loop.
 
 Usage:
-`for ( <init>, <condition>, <increment> ), strict`
+`for ( init, condition, increment ), strict`
 
-This macro requires brackets around a comma separated list of for init, condition and increment values. 
-Values for <init> and <increment> can be any amount of instructions separated by ':' and are both optional. 
-The <condition> can be anything that follows conditional expression syntax. The end of the code block for the 
-loop is defined by `next`
+This macro requires brackets around a comma separated list of for 
+init, condition and increment values. Values for `init` and `increment` 
+can be any amount of instructions separated by ':' and are both optional. 
+The `condition` can be anything that follows conditional expression syntax, 
+including multiple instructions. The end of the code block for the 
+loop is defined by `next`.
 
-Note: Code for <init> will always be executed. If any value is passed for <strict> the loop will only be 
-executed after <condition> is checked. If <strict> is not used, the loop will always be executed at least once. 
-If it is intended that the loop will be executed at least once, do not use strict - it avoids the generation of a JMP command.
+Note: Code for `init` will always be executed. If any value is passed for `strict` (optional) 
+the loop will only be executed after `condition` is checked. If `strict` is not used, 
+the loop will always be executed at least once. If it is known that the loop will be 
+executed at least once, do not use strict - it avoids the generation of a JMP command.
 
 Example:
 
@@ -525,31 +536,27 @@ Example:
 
 #### Switch Statement
 
-Macro **switch** works with macros **case**, and **endswitch** to build a list of constants and corresponding address table 
-to use as a jump table. Example:
+Macro `switch` works with macros `case`, and `endswitch` to build a list of constants 
+and corresponding address table to use as a jump table. Example:
 
     switch a	; switch on register a
     
         case #0
-        
             ; case 0 code
             ; ...
             break
             
         case #12
-        
             ; case 12 code
             ; ...
             break
             
         case #34
-        
             ; case 34 code
             ; ...
             ; no break, fall through to case #9
             
         case #9
-        
             ; case 9 code
             ; ...
             break
@@ -558,7 +565,6 @@ to use as a jump table. Example:
         case #5
         case #6
         case #7
-        
             ; case 4,5,6,7 code
             ; ...
             break
@@ -569,32 +575,30 @@ to use as a jump table. Example:
     
     endswitch
 
-If the macro setSwitchStatementDataSeg is used first, the data table will be placed in the defined segment and will allow the macro to not have to include 
-a JMP command to skip the data tables. Example:
+If the macro `setSwitchStatementDataSeg` is used first, the data table 
+will be placed in the defined segment and will allow the macro to not 
+have to include a JMP command to skip the data tables generated 
+by `endswitch` Example:
 
     setSwitchStatementDataSeg "RODATA"
     switch a
     
         case #0
-        
             ; case 0 code
             ; ...
             break
             
         case #1
-        
             ; case 1 code
             ; ...
             break
             
         case #2
-        
             ; case 2 code
             ; ...
             break
             
         case #3
-        
             ; case 3 code
             ; ...
             break
@@ -611,31 +615,27 @@ a JMP command to skip the data tables. Example:
     endswitch
 
 The previous example has ordered cases starting at zero. In this case, add 
-the **goto** option to jump to the matching case without searching for a match:
+the `goto` option to jump to the matching case without searching for a match:
 
     setSwitchStatementDataSeg "RODATA"
     switch index, goto
     
         case #0
-        
             ; case 0 code
             ; ...
             break
             
         case #1
-        
             ; case 1 code
             ; ...
             break
             
         case #2
-        
             ; case 2 code
             ; ...
             break
             
         case #3
-        
             ; case 3 code
             ; ...
             break
@@ -644,7 +644,6 @@ the **goto** option to jump to the matching case without searching for a match:
         case #5
         case #6
         case #7
-        
             ; case 4,5,6,7 code
             ; ...
             break
@@ -653,14 +652,17 @@ the **goto** option to jump to the matching case without searching for a match:
     
 ## Other Optimizations
 
-In the examples for **else** and **elseif**, it was show that an known flag status can be passed by the
-programmer to optimize the branch from a **JMP** instruction to a branch. The **if**, **else** and **elseif** 
-macros can also be optimized slightly further with two more optional annotations:
+In the examples for `else` and `elseif`, it was show that an known 
+flag status can be passed by the programmer to optimize the branch 
+from a `JMP` instruction to a branch. The `if`, `else` and `elseif` 
+macros can also be optimized slightly further with two more optional 
+annotations:
 
-### Chaining the **endif** Statement - chain
+#### Chaining the `endif` Statement - chain
 
-When using **if** the option **chain** can be added as a parameter to branch to the **endif** of an
-enclosing **if**  in a nested **if** statement. Example:
+When using `if` the option `chain` can be added as a parameter to 
+generate a branch to the `endif` of an enclosing `if` in a nested `if` 
+statement. Example:
 
     if ( controller & #BUTTON_UP )
         dec cursorIndex
@@ -675,14 +677,15 @@ enclosing **if**  in a nested **if** statement. Example:
         jmp doPause
     endif
     
-The macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
-If **\_\_CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
+The macro code will verify that this option is used correctly with 
+an `.assert`. (Can only be checked at link time.) If `__CA65HL_WARNING_LEVEL__` 
+is non-zero the macro code will suggest to use this feature where possible.
 
-### Optimizing tail call JMP before an **else** or **elseif** - jmp
+#### Optimizing tail call JMP before an `else` or `elseif` - jmp
     
-When using **else** or **elseif** the option **jmp** can be added as a parameter if the last instruction before the 
-**else** or **elseif** is a **JMP** and it is known that the implied **JMP** or branch before the
-**else** or **elseif** will never be executed.
+When using `else` or `elseif` the option `jmp` can be added as a parameter if the 
+last instruction before the `else` or `elseif` is a `JMP` and it is known that 
+the implied `JMP` or branch before the `else` or `elseif` will never be executed.
 Example:
 
     if ( controller & #BUTTON_UP )
@@ -693,17 +696,22 @@ Example:
         jmp doPause
     endif
 
-If **\_CUSTOM_SYNTAX_** is non-zero, the macro code will verify that this option is used correctly with an **.assert**. (Can only be checked at link time.)
-If **\_CUSTOM_SYNTAX_** is non-zero, and **\_\_CA65HL_WARNING_LEVEL__** is non-zero the macro code will suggest to use this feature.
-If **\_CUSTOM_SYNTAX_** is zero, this option can be used, but the macro code will not be able to verify its use.
+If `_CUSTOM_SYNTAX_` is non-zero, the macro code will verify that this option is 
+used correctly with an `.assert`. (Can only be checked at link time.)
+If `_CUSTOM_SYNTAX_` is non-zero, and `__CA65HL_WARNING_LEVEL__` is non-zero 
+the macro code will suggest to use this feature where possible.
+If `_CUSTOM_SYNTAX_` is zero, this option can be used, but the macro code 
+will not be able to verify its coorect use.
 
 ## Warnings
 
-The macros in this package attempt to give helpful error messages and warnings about how to use them. 
-Warnings will remind about register overwrites or other code generation that might not be obvious and could possibly 
-cause bugs in some cases. The identifier **\_\_CA65HL_WARNING_LEVEL__** can be set from 0 to 2 to offer warnings about 
-some changes to registers or other changes to the state of the CPU that may not be obvious firsthand.
-Important errors or warnings will not be suppressed.
+The macros in this package attempt to give helpful error messages and warnings 
+about how to use them. 
+The identifier `__CA65HL_WARNING_LEVEL__` can be set from 0 to 2 to output
+warnings about some changes to registers, or optimizations that could be 
+applied that ca65 cannot determine on its own at assemble time 
+( due to the one-pass assembly design ). Important errors or warnings will 
+not be suppressed.
 
 
 END
