@@ -43,8 +43,6 @@
 ; > for..next
 ; > switch..case..endswitch
 
-
-
 .ifndef ::_CA65HL_H_
 ::_CA65HL_H_ = 1
 
@@ -55,7 +53,7 @@
 
 ; Warn in some cases if turned on:
 .ifndef ::__CA65HL_WARNING_LEVEL__
-    ::__CA65HL_WARNING_LEVEL__ = 0
+    ::__CA65HL_WARNING_LEVEL__ = 2
 .endif
 
 ; --------------------------------------------------------------------------------------------
@@ -207,7 +205,7 @@
 ; This inline macro will expand to a branch instruction.
 ; (uses .left to turn .ident into a token list: ca65 will recognized as an above .define)
 
-.define ___Branch (F, S, label) .left(1, .ident( .sprintf("BranchOn_%s_%s", .string(F), .string(S)))) label
+.define ___Branch (___F, ___S, label) .left(1, .ident( .sprintf("BranchOn_%s_%s", .string(___F), .string(___S)))) label
 
 ; --------------------------------------------------------------------------------------------
 ; Function: setBranchFlag f, setBranchCondition s
@@ -219,13 +217,13 @@
 ;
 ; Individually define branch flag and flag status for next branch.
 
-.macro setBranchFlag f
+.macro setBranchFlag _f
     ___branchSet::branchDefined .set 1
-    .define branchFlag f
+    .define branchFlag _f
 .endmacro
 
-.macro setBranchCondition s
-    .define branchCondition s
+.macro setBranchCondition _s
+    .define branchCondition _s
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -326,7 +324,7 @@
     BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
     BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
     BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
-    BREAK_TYPE_DEFINED                  .set 0  ; flag: only undefine ___loopType if set
+    LOOP_TYPE_DEFINED                   .set 0  ; flag: only undefine ___loopType if set
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -659,7 +657,7 @@
     .define _RIGHT_EXP .mid(pos1 + 1 + carryOp, tcount - pos1 - 1 - carryOp, {exp})
     
     ; override register to A if the following:
-    .if ( op1 > 2 ) || ( op1 <= 2 && (.match(.left(1,_RIGHT_EXP), 1)))  ; ADD and SUB are 1, 2
+    .if ( op1 > 2 ) || ( ( op1 = 1 || op1 = 2) && (!.match(.left(1,_RIGHT_EXP), 1)))  ; ADD and SUB are 1, 2
         reg .set ___math::REGA
     .endif
     
@@ -1431,7 +1429,7 @@
                 ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
                 .define longJumpAssert() destinationLabel - firstBranchToLongJump - 3 > 127
             .endif
-            .assert longJumpAssert, warning, "Branch could be reached without a long branch. (Try 'setLongBranch -')."
+            .assert longJumpAssert, warning, "Branch can be reached without a long branch. (Try 'setLongBranch -')."
             .undefine longJumpAssert
         .endif
     .endif
@@ -1793,6 +1791,28 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+; Function: forever
+;
+; Always branch back to <repeat> or <do>.
+;
+; Parameters:
+;
+;   See Also:
+;   <do>, <while>, <repeat>
+
+.macro forever branchtype
+    .local DO_WHILE_STATEMENT_COUNT
+    stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+    ; check if all okay
+    .if DO_WHILE_STATEMENT_COUNT < 0 
+        ___error "Missing 'repeat' or 'do'"
+    .endif
+    jmp .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", DO_WHILE_STATEMENT_COUNT))
+    ___popLoopType
+    ___generateBreakLabel
+.endmacro
+
+; --------------------------------------------------------------------------------------------
 ; Function: while_do condition
 ;
 ; While the condition is true, repeat the code block to <endwhile>.
@@ -1875,11 +1895,11 @@
 
 .macro ___popLoopType 
     popTokenList "LOOP_TYPE"
-    .if FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED
+    .if FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED
         .undefine ___loopType
     .endif
     .define ___loopType poppedTokenList
-    FLOW_CONTROL_VALUES::BREAK_TYPE_DEFINED .set 1
+    FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED .set 1
 .endmacro
     
 
@@ -1977,7 +1997,7 @@
 ;   the loop will always be executed at least once. If it is clear the loop will be 
 ;   executed at least once, do not use strict - it avoids the generation of a JMP command.
 
-.macro for init, condition, increment, strict
+.macro for init, condition, increment, op1
 
     ; --------------------------------------------------------------------------------------------
     ; error checks and defines:
@@ -2000,7 +2020,10 @@
     ; execute the INIT, before the loop
     ___evaluateStatementList {INIT}
     
-    .ifnblank strict
+    .ifnblank op1
+        .if !.xmatch(op1, strict)
+            ___error "Expected: 'strict': Test condition before first loop is executed."
+        .endif
         jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER))
     .endif
     .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER)):
@@ -2093,13 +2116,10 @@
     .if !gotoMode
         .if .xmatch( reg, a )
             ;
-            .define SWITCH_INFO_REG "none"
         .elseif  .xmatch( reg, x )
             txa
-            .define SWITCH_INFO_REG "A"
         .elseif  .xmatch( reg, y )
             tya
-            .define SWITCH_INFO_REG "A"
         .else 
             lda reg
         .endif

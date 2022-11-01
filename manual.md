@@ -327,7 +327,7 @@ recognized identifier is found, so this also will work:
         ; too high code
     endif
 
-Valid comparison operators: `= &lt;&gt;, &gt;, &lt;, &gt;=, <=`
+Valid comparison operators: `=, <>, >, <, >=, <=`
 
 If you wish to use another register:
 
