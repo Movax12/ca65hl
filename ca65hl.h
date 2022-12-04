@@ -899,7 +899,11 @@
                 ___doCompare {S}
             .elseif .definedmacro ( .left(1,{S}))
                 printTokenListDebug {Macro: S}
-                .left (1,{S}) { .mid (1, .tcount({S}) - 1, {S} ) }
+                .if .tcount({S}) = 1
+                    .left (1,{S})
+                .else
+                    .left (1,{S}) { .mid (1, .tcount({S}) - 1, {S} ) }
+                .endif
             .elseif .ismnemonic(.left (1,{S})) || .xmatch( .left (1,{S}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
                 .left (1,{S}) .mid (1, .tcount({S}) - 1, {S} )
             .else
@@ -1025,7 +1029,8 @@
 ; Parameters:
 ;
 ;   condition - Conditional expression to evaluate. Requires surrounding braces.
-;   branchtype - can be 'long' or 'short' to override current setLongBranch settings
+;   opt0, opt1 - can be 'long' or 'short' to override current setLongBranch settings, or 'chain'
+
 ;
 ; Parenthesis are required around the test condition.
 ; 
@@ -1043,6 +1048,7 @@
 ; to a provided label when used with 'goto'. If used with 'break', it will verify a valid break 
 ; (inside a loop) and branch to the next break label. If no 'goto' or 'break', it will branch to 
 ; the next ENDIF (or ELSE, or ELSEIF) on an inverted condition.
+
 
 .macro if condition, opt0, opt1
     
@@ -1089,6 +1095,8 @@
     .local foundOR                   ;  flag: found an || when scanning ahead while considering if bracket set is negated
     .local useLongJump               ;  flag: set true if macro param. branchtype is 'long' or if omitted set to true if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
     .local chainedFlag               ;  flag: branch to next enclosing ENDIF for ELSE and ELSEIF structures
+    .local longJumpNotNeeded
+
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
@@ -1138,11 +1146,6 @@
     .undefine _IF_OPT0_
     .undefine _IF_OPT1_
     
-    ; no long jump option passed, use setLongBranch setting:
-    .if useLongJump = -1
-        useLongJump .set FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
-    .endif
-    
     ; array for label locations: (uses global to reuse ident)
     .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
@@ -1153,8 +1156,14 @@
     nextToken                 ; check it is a '('
     saveTokenListPosition
     allowAllTokens
+    ; skip the first '('
+    nextToken
+    bracketLevel .set 1
     .repeat .tcount({condition})
         .if xmatchToken {(}
+            .if bracketLevel = 0
+                ___error "Mismatched parenthesis."
+            .endif
             bracketLevel .set bracketLevel + 1
         .elseif xmatchToken {)}
             bracketLevel .set bracketLevel - 1
@@ -1165,6 +1174,7 @@
         .endif
         nextToken
     .endrepeat
+
     .if bracketLevel <> 0
         ___error "Mismatched parenthesis."
     .endif
@@ -1212,15 +1222,13 @@
         .endif
     .endif
     
-    ; If long jump active, invert condition and branch to exitBranchEvaluation to skip the 'jmp destinationLabel'
-    ; In this case a 'pass' or 'true' condition (before it is inverted) will use 'jmp' to branch to the label.
-    .if useLongJump
-        negateBracketSet .set !negateBracketSet
-        .define conditionPassLabel exitBranchEvaluation
-        .define conditionFailLabel longJumpLabel
-    .else
-        .define conditionPassLabel destinationLabel
-        .define conditionFailLabel exitBranchEvaluation
+    ; no long jump option passed, use setLongBranch setting:
+    .if useLongJump = -1
+        .ifdef destinationLabel
+            useLongJump .set 1
+        .else
+            useLongJump .set FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE
+        .endif
     .endif
     
     ; --------------------------------------------------------------------------------------------
@@ -1379,29 +1387,34 @@
             .endif
             ; --------------------------------------------------------------------------------------------
             ; END ||
-            .if foundAND || foundOR
-                .if foundTokenPosition
-                    ; branch to next appropriate '&&' or '||' statement:
-                    .define branchToLabel .ident(.sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition))
-                    tokenPositionForBranchLabel{branchLabelCounter} .set foundTokenPosition
-                    branchLabelCounter .set branchLabelCounter + 1
-                .else ; found a '||' or '&&' that affects this branch, but no following '&&','||' to branch to:
-                    .if foundAND
-                        .define branchToLabel conditionFailLabel    ; branch to conditionFailLabel on inverted flag, e.g. (for C set branch): if ( C set && N set)
-                        
-                        ; if long jumps active, save the first branch that uses the long jump
-                        ; (only conditionFailLabel will be a branch to the long jump)
-                        .if useLongJump
-                            .ifndef firstBranchToLongJump
-                                firstBranchToLongJump = * + 2 ; address for end of next branch
-                            .endif
-                        .endif
-                    .else ; foundOR
-                        .define branchToLabel conditionPassLabel    ; branch to conditionPassLabel on flag, e.g.: if ( C set || N set)
-                    .endif
+            
+            ; if label is a lower address, and in reach of a branch:
+            longJumpNotNeeded .set .def(destinationLabel) && ((*+2)-(destinationLabel) <= 127)
+            .if foundTokenPosition
+                ; branch to next appropriate '&&' or '||' statement:
+                .define branchToLabel .ident(.sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, foundTokenPosition))
+                tokenPositionForBranchLabel{branchLabelCounter} .set foundTokenPosition
+                branchLabelCounter .set branchLabelCounter + 1    
+            .elseif useLongJump && (!longJumpNotNeeded) ; long jump needed, or unknown if needed
+                .ifndef firstBranchToLongJump
+                    firstBranchToLongJump = * + 2 ; address for end of next branch
                 .endif
+                .if foundAND || foundOR
+                    .if foundAND
+                        ; branch to failed test on inverted condition
+                        .define branchToLabel exitBranchEvaluation 
+                    .else ; foundOR
+                        .define branchToLabel longJumpLabel
+                    .endif
+                .else
+                    ; no AND or OR found that affects this branch, skip the JMP on inverted test
+                    ___invertBranchCondition
+                    .define branchToLabel exitBranchEvaluation
+                .endif
+            .elseif foundAND
+                .define branchToLabel exitBranchEvaluation
             .else ; no || or && found that affects this branch:
-                .define branchToLabel conditionPassLabel
+                .define branchToLabel destinationLabel
             .endif
             ___Branch branchFlag, branchCondition, branchToLabel    ; output the branch
             ___clearBranchSet                                       ; clear temporary settings
@@ -1415,7 +1428,7 @@
     .endrepeat
     
     ; when long jump active, JMP to destinationLabel
-    .if useLongJump
+    .ifdef firstBranchToLongJump
         longJumpLabel:
         jmp destinationLabel
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
@@ -1451,8 +1464,8 @@
 
     endTokenListEval ; clear token evaluation    
     .undefine destinationLabel
-    .undefine conditionFailLabel
-    .undefine conditionPassLabel
+    ;.undefine conditionFailLabel
+    ;.undefine conditionPassLabel
     .undefine tokenPositionForBranchLabel
 
 .endmacro
