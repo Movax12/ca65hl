@@ -26,11 +26,19 @@
 ;
 ; This feature allows instructions to be used as macro names. The macros then temporarily undefine themselves to
 ; allow ca65 to process the instruction normally. Be careful to not declare your own macros with instruction
-; names accidentally.
+; names accidentally. This shouldn't be possible unless these macros are inadvertently undefined. 
 ;
-; The instruction macros will process their operands through the ___arraySyntax macro that allows
+; --------------------------------------------------------------------------------------------
+; Two features offered with these macros:
+;
+; 1) More than one instruction or macro per line separated by ':'
+;
+;   In this case, commas cannot be used with instructions or macros. If a comma is desired, use a single 
+;   instruction. Macros cannot start a multi-instruction line.
+;
+; 2) The instruction macros will process their operands through the ___arraySyntax macro that allows
 ; an alternative syntax with array like indexing with constant expressions and the x or y registers.
-; 
+;
 ;   Example:
 ; > lda foo[ 4 ] ; becomes: lda foo + 4
 ;
@@ -45,9 +53,9 @@
 ;   Example:
 ; > lda [ y - 4 ]foo
 ;
-; The macro will allow any combination of constant values with either a y or x included, but the index register
+; The macro will allow any combination of constant values with either a Y or X included, but the index register
 ; must be first in the square brackets, or the index register must be preceded by a plus (+). The macro then converts 
-; it to standard syntax and passes it to ca65 to verify the addressing mode and assemble the instruction.
+; it to standard syntax and passes it to ca65 to assemble the instruction as normal.
 
 .ifndef ::_CUSTOM_SYNTAX_
 ::_CUSTOM_SYNTAX_ = 1
@@ -56,7 +64,7 @@
 
 .scope _CUSTOM_
     JMP_INSTRUCTION_COUNTER .set 0  ; count
-    FOUND_COLON             .set 0
+    EVALINSTRLISTCOUNT    .set 0  
 .endscope
 
 ; --------------------------------------------------------------------------------------------
@@ -71,7 +79,7 @@
 ;
 ; Note:
 ; It won't find the token in the very first (0) position!
-; This macro is defined elsewhere in my source, so check if defined first.
+; This macro is defined elsewhere, so check if defined first.
 
 .if !.definedmacro( ___findToken )
 .macro ___findToken param, tok, position
@@ -117,18 +125,16 @@
     .local reg
     .local regPos
     .local REGX, REGY
-    .local colonPos
     REGX = 1
     REGY = 2
-    open   .set 0
-    close  .set 0
-    reg    .set 0
+    open    .set 0
+    close   .set 0
+    reg     .set 0
     regPos  .set 0
-    colonPos .set 0
     
     ; if index was passed, treat as normal 6502 syntax and quit, since this syntax does not use commas
     .ifnblank index
-        .left(1,instr) op, index
+        instr op, index
         .exitmacro
     .endif
     
@@ -191,7 +197,7 @@
     .endif
     
     ; anything after the '[]' pair? this allows index to be anywhere in the expression, rather than only at the end
-    .if (.tcount({op}) > close + 1) && (close > 0 )
+    .if close && .tcount({op}) > close + 1
         .define _AFTER () .mid(close + 1, .tcount({op}) - close - 1 , {op})
     .else
         .define _AFTER
@@ -208,15 +214,60 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
+; Function: ___EvalInstrList statement, index
+;
+; Parameters:
+;
+;   statement - on first call, will be a CPU mnemonic and operand. After could also be a macro name
+;   index - indexed mode for the instruction - x or y
+;
+; This macro is called by the overloaded instruction macros and allows for one or more instructions
+; per line, separated by a colon ':'. A macro cannot be first on the line when using a multiple instructions.
+; It will send what it found to ___arraySyntax, to support extended syntax as described in this file.
+
+.macro ___EvalInstrList statement, index
+    ; for a multiple instruction line: if first call to this macro, save who called it with CALLING_MACRO
+    ; Example: if called by macro_ldx
+    ; CALLING_MACRO will be defined as: macro_ldx ldx
+    .if !_CUSTOM_::EVALINSTRLISTCOUNT
+        .define CALLING_MACRO .ident(.concat("macro_", .string(.left(1,{statement})))) .left(1,{statement})
+    .endif
+    _CUSTOM_::EVALINSTRLISTCOUNT .set _CUSTOM_::EVALINSTRLISTCOUNT + 1
+    ; split macro calls at colons:
+    .local colonPos
+    colonPos .set 0
+    ___findToken {statement}, :, colonPos
+    .if colonPos
+        .ifnblank index
+            .error "Commas not supported for multiple instructions on one line."
+            .fatal ""
+        .endif
+        ___EvalInstrList .mid(0, colonPos, {statement})
+        ___EvalInstrList .mid( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} )
+    .else
+        ; no colon, output macros or instructions
+        .if .xmatch (.left(1,{statement}), .left(1, CALLING_MACRO) )    ; is this the calling macro? don't call the macro, call the instruction
+            ___arraySyntax .right(1, CALLING_MACRO), { .mid (1, .tcount({statement}) - 1, {statement} ) }, index
+        .elseif .definedmacro ( .left(1,{statement})) 
+            statement
+        .elseif .ismnemonic(.left (1,{statement})) || .xmatch( .left (1,{statement}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
+            ___arraySyntax .left (1,{statement}), { .mid (1, .tcount({statement}) - 1, {statement} ) }, index
+        .else
+            .error "Unknown instruction or macro."
+        .endif
+    .endif
+    _CUSTOM_::EVALINSTRLISTCOUNT .set _CUSTOM_::EVALINSTRLISTCOUNT - 1
+    .if !_CUSTOM_::EVALINSTRLISTCOUNT
+        .undefine CALLING_MACRO
+    .endif
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; special case for JMP:
 
 .macro macro_jmp operand
-    seperateColonList jmp, operand
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine jmp
     jmp operand
-    
     ; Use this code with ca65hl.h to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
     ; If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF macro that will suppress the macro's normal generation of a 
     ; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
@@ -224,582 +275,291 @@
         ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER)):
         _CUSTOM_::JMP_INSTRUCTION_COUNTER .set _CUSTOM_::JMP_INSTRUCTION_COUNTER + 1
     .endif
-    
     .define jmp macro_jmp
 .endmacro
 
-.macro seperateColonList instr, op, index
-
-    .local colonPos
-    colonPos .set 0
-    _CUSTOM_::FOUND_COLON .set 0
-    ___findToken {op}, :, colonPos
-    .if colonPos
-        .left(1, instr) .mid(0, colonPos, {op})
-        .mid(colonPos + 1, .tcount({op}) -  colonPos - 1, {op})
-        _CUSTOM_::FOUND_COLON .set 1
-    .elseif .xmatch ( { .left(1, {op}) }, : )
-        .left(1, instr)
-        .mid(1, .tcount({op}) - 1, {op})
-        _CUSTOM_::FOUND_COLON .set 1
-    .endif
-    
-.endmacro
 ; --------------------------------------------------------------------------------------------
-; Allow custom syntax for all modes that use operands:
+; Allow custom syntax for all instructions
 
 .macro macro_lda operand, index
-    seperateColonList lda, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine lda
-    ___arraySyntax lda, operand, index
+    ___EvalInstrList lda operand, index
     .define lda macro_lda
 .endmacro
-
 .macro macro_sta operand, index
-    seperateColonList sta, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sta
-    ___arraySyntax sta, operand, index
+    ___EvalInstrList sta operand, index
     .define sta macro_sta
 .endmacro
-
 .macro macro_ldx operand, index
-    seperateColonList ldx, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine ldx
-    ___arraySyntax ldx, operand, index
+    ___EvalInstrList ldx operand, index
     .define ldx macro_ldx
 .endmacro
-
 .macro macro_stx operand, index
-    seperateColonList stx, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine stx
-    ___arraySyntax stx, operand, index
+    ___EvalInstrList stx operand, index
     .define stx macro_stx
 .endmacro
-
 .macro macro_ldy operand, index
-    seperateColonList ldy, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine ldy
-    ___arraySyntax ldy, operand, index
+    ___EvalInstrList ldy operand, index
     .define ldy macro_ldy
 .endmacro
-
 .macro macro_sty operand, index
-    seperateColonList sty, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sty
-    ___arraySyntax sty, operand, index
+    ___EvalInstrList sty operand, index
     .define sty macro_sty
 .endmacro
-
 .macro macro_adc operand, index
-    seperateColonList adc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine adc
-    ___arraySyntax adc, operand, index
+    ___EvalInstrList adc operand, index
     .define adc macro_adc
 .endmacro
-
 .macro macro_and operand, index
-    seperateColonList and, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine and
-    ___arraySyntax and, operand, index
+    ___EvalInstrList and operand, index
     .define and macro_and
 .endmacro
-
 .macro macro_asl operand, index
-    seperateColonList asl, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine asl
-    ___arraySyntax asl, operand, index
+    ___EvalInstrList asl operand, index
     .define asl macro_asl
 .endmacro
-
 .macro macro_cmp operand, index
-    seperateColonList cmp, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine cmp
-    ___arraySyntax cmp, operand, index
+    ___EvalInstrList cmp operand, index
     .define cmp macro_cmp
 .endmacro
-
 .macro macro_dec operand, index
-    seperateColonList dec, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine dec
-    ___arraySyntax dec, operand, index
+    ___EvalInstrList dec operand, index
     .define dec macro_dec
 .endmacro
-
 .macro macro_eor operand, index
-    seperateColonList eor, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine eor
-    ___arraySyntax eor, operand, index
+    ___EvalInstrList eor operand, index
     .define eor macro_eor
 .endmacro
-
 .macro macro_inc operand, index
-    seperateColonList inc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine inc
-    ___arraySyntax inc, operand, index
+    ___EvalInstrList inc operand, index
     .define inc macro_inc
 .endmacro
-
 .macro macro_lsr operand, index
-    seperateColonList lsr, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine lsr
-    ___arraySyntax lsr, operand, index
+    ___EvalInstrList lsr operand, index
     .define lsr macro_lsr
 .endmacro
-
 .macro macro_ora operand, index
-    seperateColonList ora, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine ora
-    ___arraySyntax ora, operand, index
+    ___EvalInstrList ora operand, index
     .define ora macro_ora
 .endmacro
-
 .macro macro_rol operand, index
-    seperateColonList rol, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine rol
-    ___arraySyntax rol, operand, index
+    ___EvalInstrList rol operand, index
     .define rol macro_rol
 .endmacro
-
 .macro macro_ror operand, index
-    seperateColonList ror, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine ror
-    ___arraySyntax ror, operand, index
+    ___EvalInstrList ror operand, index
     .define ror macro_ror
 .endmacro
-
 .macro macro_sbc operand, index
-    seperateColonList sbc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sbc
-    ___arraySyntax sbc, operand, index
+    ___EvalInstrList sbc operand, index
     .define sbc macro_sbc
 .endmacro
-
 .macro macro_bit operand, index
-    seperateColonList bit, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bit
-    ___arraySyntax bit, operand, index
+    ___EvalInstrList bit operand, index
     .define bit macro_bit
 .endmacro
-
 .macro macro_cpx operand, index
-    seperateColonList cpx, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine cpx
-    ___arraySyntax cpx, operand, index
+    ___EvalInstrList cpx operand, index
     .define cpx macro_cpx
 .endmacro
-
 .macro macro_cpy operand, index
-    seperateColonList cpy, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine cpy
-    ___arraySyntax cpy, operand, index
+    ___EvalInstrList cpy operand, index
     .define cpy macro_cpy
 .endmacro
-
 .macro macro_inx operand, index
-    seperateColonList inx, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine inx
-    ___arraySyntax inx, operand, index
+    ___EvalInstrList inx operand, index
     .define inx macro_inx
 .endmacro
-
 .macro macro_iny operand, index
-    seperateColonList iny, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine iny
-    ___arraySyntax iny, operand, index
+    ___EvalInstrList iny operand, index
     .define iny macro_iny
 .endmacro
-
 .macro macro_bcc operand, index
-    seperateColonList bcc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bcc
-    ___arraySyntax bcc, operand, index
+    ___EvalInstrList bcc operand, index
     .define bcc macro_bcc
 .endmacro
-
 .macro macro_bcs operand, index
-    seperateColonList bcs, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bcs
-    ___arraySyntax bcs, operand, index
+    ___EvalInstrList bcs operand, index
     .define bcs macro_bcs
 .endmacro
-
 .macro macro_beq operand, index
-    seperateColonList beq, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine beq
-    ___arraySyntax beq, operand, index
+    ___EvalInstrList beq operand, index
     .define beq macro_beq
 .endmacro
-
 .macro macro_bne operand, index
-    seperateColonList bne, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bne
-    ___arraySyntax bne, operand, index
+    ___EvalInstrList bne operand, index
     .define bne macro_bne
 .endmacro
-
 .macro macro_bpl operand, index
-    seperateColonList bpl, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bpl
-    ___arraySyntax bpl, operand, index
+    ___EvalInstrList bpl operand, index
     .define bpl macro_bpl
 .endmacro
-
 .macro macro_bmi operand, index
-    seperateColonList bmi, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bmi
-    ___arraySyntax bmi, operand, index
+    ___EvalInstrList bmi operand, index
     .define bmi macro_bmi
 .endmacro
-
 .macro macro_brk operand, index
-    seperateColonList brk, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine brk
-    ___arraySyntax brk, operand, index
+    ___EvalInstrList brk operand, index
     .define brk macro_brk
 .endmacro
-
 .macro macro_bvc operand, index
-    seperateColonList bvc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bvc
-    ___arraySyntax bvc, operand, index
+    ___EvalInstrList bvc operand, index
     .define bvc macro_bvc
 .endmacro
-
 .macro macro_bvs operand, index
-    seperateColonList bvs, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine bvs
-    ___arraySyntax bvs, operand, index
+    ___EvalInstrList bvs operand, index
     .define bvs macro_bvs
 .endmacro
-
 .macro macro_clc operand, index
-    seperateColonList clc, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine clc
-    ___arraySyntax clc, operand, index
+    ___EvalInstrList clc operand, index
     .define clc macro_clc
 .endmacro
-
 .macro macro_cld operand, index
-    seperateColonList cld, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine cld
-    ___arraySyntax cld, operand, index
+    ___EvalInstrList cld operand, index
     .define cld macro_cld
 .endmacro
-
 .macro macro_cli operand, index
-    seperateColonList cli, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine cli
-    ___arraySyntax cli, operand, index
+    ___EvalInstrList cli operand, index
     .define cli macro_cli
 .endmacro
-
 .macro macro_clv operand, index
-    seperateColonList clv, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine clv
-    ___arraySyntax clv, operand, index
+    ___EvalInstrList clv operand, index
     .define clv macro_clv
 .endmacro
-
 .macro macro_dex operand, index
-    seperateColonList dex, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine dex
-    ___arraySyntax dex, operand, index
+    ___EvalInstrList dex operand, index
     .define dex macro_dex
 .endmacro
-
 .macro macro_dey operand, index
-    seperateColonList dey, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine dey
-    ___arraySyntax dey, operand, index
+    ___EvalInstrList dey operand, index
     .define dey macro_dey
 .endmacro
-
 .macro macro_jsr operand, index
-    seperateColonList jsr, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine jsr
-    ___arraySyntax jsr, operand, index
+    ___EvalInstrList jsr operand, index
     .define jsr macro_jsr
 .endmacro
-
 .macro macro_nop operand, index
-    seperateColonList nop, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine nop
-    ___arraySyntax nop, operand, index
+    ___EvalInstrList nop operand, index
     .define nop macro_nop
 .endmacro
-
 .macro macro_pha operand, index
-    seperateColonList pha, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine pha
-    ___arraySyntax pha, operand, index
+    ___EvalInstrList pha operand, index
     .define pha macro_pha
 .endmacro
-
 .macro macro_php operand, index
-    seperateColonList php, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine php
-    ___arraySyntax php, operand, index
+    ___EvalInstrList php operand, index
     .define php macro_php
 .endmacro
-
 .macro macro_pla operand, index
-    seperateColonList pla, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine pla
-    ___arraySyntax pla, operand, index
+    ___EvalInstrList pla operand, index
     .define pla macro_pla
 .endmacro
-
 .macro macro_plp operand, index
-    seperateColonList plp, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine plp
-    ___arraySyntax plp, operand, index
+    ___EvalInstrList plp operand, index
     .define plp macro_plp
 .endmacro
-
 .macro macro_rti operand, index
-    seperateColonList rti, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine rti
-    ___arraySyntax rti, operand, index
+    ___EvalInstrList rti operand, index
     .define rti macro_rti
 .endmacro
-
 .macro macro_rts operand, index
-    seperateColonList rts, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine rts
-    ___arraySyntax rts, operand, index
+    ___EvalInstrList rts operand, index
     .define rts macro_rts
 .endmacro
-
 .macro macro_sec operand, index
-    seperateColonList sec, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sec
-    ___arraySyntax sec, operand, index
+    ___EvalInstrList sec operand, index
     .define sec macro_sec
 .endmacro
-
 .macro macro_sed operand, index
-    seperateColonList sed, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sed
-    ___arraySyntax sed, operand, index
+    ___EvalInstrList sed operand, index
     .define sed macro_sed
 .endmacro
-
 .macro macro_sei operand, index
-    seperateColonList sei, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine sei
-    ___arraySyntax sei, operand, index
+    ___EvalInstrList sei operand, index
     .define sei macro_sei
 .endmacro
-
 .macro macro_tax operand, index
-    seperateColonList tax, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine tax
-    ___arraySyntax tax, operand, index
+    ___EvalInstrList tax operand, index
     .define tax macro_tax
 .endmacro
-
 .macro macro_tay operand, index
-    seperateColonList tay, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine tay
-    ___arraySyntax tay, operand, index
+    ___EvalInstrList tay operand, index
     .define tay macro_tay
 .endmacro
-
 .macro macro_tsx operand, index
-    seperateColonList tsx, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine tsx
-    ___arraySyntax tsx, operand, index
+    ___EvalInstrList tsx operand, index
     .define tsx macro_tsx
 .endmacro
-
 .macro macro_txa operand, index
-    seperateColonList txa, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine txa
-    ___arraySyntax txa, operand, index
+    ___EvalInstrList txa operand, index
     .define txa macro_txa
 .endmacro
-
 .macro macro_txs operand, index
-    seperateColonList txs, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine txs
-    ___arraySyntax txs, operand, index
+    ___EvalInstrList txs operand, index
     .define txs macro_txs
 .endmacro
-
 .macro macro_tya operand, index
-    seperateColonList tya, operand, index
-    .if _CUSTOM_::FOUND_COLON
-        .exitmacro
-    .endif
     .undefine tya
-    ___arraySyntax tya, operand, index
+    ___EvalInstrList tya operand, index
     .define tya macro_tya
 .endmacro
 
-
+; --------------------------------------------------------------------------------------------
 ; OVERLOAD
+; --------------------------------------------------------------------------------------------
 
 .define jmp macro_jmp
 .define lda macro_lda
@@ -825,7 +585,6 @@
 .define cpy macro_cpy
 .define inx macro_inx
 .define iny macro_iny
-
 .define bcc macro_bcc
 .define bcs macro_bcs
 .define beq macro_beq
@@ -858,7 +617,5 @@
 .define txa macro_txa
 .define txs macro_txs
 .define tya macro_tya
-
-
 
 .endif

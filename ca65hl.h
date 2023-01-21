@@ -121,7 +121,6 @@
 .endmacro
 .endif
 
-
 ; --------------------------------------------------------------------------------------------
 ; Function: ___error
 ;
@@ -257,19 +256,28 @@
 .macro setBranch branch
     .if !___branchSet::branchDefined
         ___branchSet::branchDefined .set 1
+        .if .xmatch(.left(1,{branch}), !)   ; check for !, skip
+            .define ___BRANCH() .mid(1, .tcount({branch}) - 1, {branch})   
+        .else
+            .define ___BRANCH() branch
+        .endif
         ; error check: must be C Z N V G
-        .if !(.xmatch( {.left(1,branch)}, C) || .xmatch( {.left(1,branch)}, Z) || .xmatch( {.left(1,branch)}, N) || .xmatch( {.left(1,branch)}, V) || .xmatch( {.left(1,branch)}, G))
+        .if !(.xmatch( {.left(1,___BRANCH)}, C) || .xmatch( {.left(1,___BRANCH)}, Z) || .xmatch( {.left(1,___BRANCH)}, N) || .xmatch( {.left(1,___BRANCH)}, V) || .xmatch( {.left(1,___BRANCH)}, G))
             ___error "Expected: Valid flag: C, Z, N, V, G"
         .endif
-        setBranchFlag {.left(1,branch)}
-        .if .tcount({branch}) > 1
-            .if !(.xmatch( {.right(1,branch)}, set) || .xmatch( {.right(1,branch)}, clear))
+        setBranchFlag {.left(1,___BRANCH)}
+        .if .tcount({___BRANCH}) > 1
+            .if !(.xmatch( {.right(1,___BRANCH)}, set) || .xmatch( {.right(1,___BRANCH)}, clear))
                 ___error "Expected: 'set' or 'clear'"
             .endif
-            setBranchCondition {.right(1,branch)}
+            setBranchCondition {.right(1,___BRANCH)}
         .else
             setBranchCondition set
         .endif
+        .if .xmatch(.left(1,{branch}), !)
+            ___invertBranchCondition
+        .endif
+        .undefine ___BRANCH
     .endif
 .endmacro
 
@@ -356,6 +364,20 @@
             ___error "Unknown long branch setting."
         .endif
     .endif
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: depreciateLongBranch
+;
+; Parameters:
+;
+;   l - 'long' or 'short' expected
+;
+; If long or short branch forced, will be ignored for backward branches.
+; Warn that this is the case. This will be removed in future versions.
+
+.macro depreciateLongBranch
+    .warning "Long branch option depreciated for backward branches. Backward branches automatically generated!"        
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -506,11 +528,11 @@
     .endif
     
     .if left = ___math::REGA
-        cmp {_RIGHT}
+        cmp _RIGHT
     .elseif left = ___math::REGX
-        cpx {_RIGHT}
+        cpx _RIGHT
     .elseif left = ___math::REGY
-        cpy {_RIGHT}
+        cpy _RIGHT
     .endif
     .if ___compare::operator     = ___compare::GREATER
         ___setBranch G set
@@ -704,20 +726,20 @@
         .if pos1 + carryOp + 1 = .tcount({exp})
             adc #0
         .else
-            adc {_RIGHT_EXP}
+            adc _RIGHT_EXP
         .endif
     .elseif op1 = ___math::SUBC 
         .if pos1 + carryOp + 1 = .tcount({exp})
             sbc #0
         .else
-            sbc {_RIGHT_EXP}
+            sbc _RIGHT_EXP
         .endif
     .elseif op1 = ___math::SUB
         sec
-        sbc {_RIGHT_EXP}
+        sbc _RIGHT_EXP
     .elseif op1 = ___math::ADD
         clc
-        adc {_RIGHT_EXP}
+        adc _RIGHT_EXP
     .elseif op1 = ___math::SHL
         .repeat _RIGHT_EXP
             asl a
@@ -727,11 +749,11 @@
             lsr a
         .endrepeat
     .elseif op1 = ___math::AND_
-        and {_RIGHT_EXP}
+        and _RIGHT_EXP
     .elseif op1 = ___math::OR
-        ora {_RIGHT_EXP}
+        ora _RIGHT_EXP
     .elseif op1 = ___math::EOR_
-        eor {_RIGHT_EXP}
+        eor _RIGHT_EXP
     .endif
     .undefine _RIGHT_EXP
     .undefine _LOAD
@@ -757,10 +779,10 @@
 
 .macro mb register, exp
 
-    .local rightReg
+    .local requestReg
     .local leftReg
     .local pos
-    rightReg    .set 0
+    requestReg    .set 0
     leftReg     .set 0    
     pos .set 0
     .ifblank exp
@@ -769,11 +791,11 @@
         ; register passed in 'register':
         .define _EXP () exp
         .if .xmatch(register, a)
-            rightReg .set ___math::REGA
+            requestReg .set ___math::REGA
         .elseif .xmatch(register, x)
-            rightReg .set ___math::REGX
+            requestReg .set ___math::REGX
         .elseif .xmatch(register, y)
-            rightReg .set ___math::REGY
+            requestReg .set ___math::REGY
         .else
             ___error "Unknown register."
         .endif
@@ -801,54 +823,54 @@
         leftReg .set ___math::REGY
     .endif
     
-    .if !rightReg ; if no register defined for move yet, see if it is explicitly used on the right side
+    .if !requestReg ; if no register defined for move yet, see if it is explicitly used on the right side
         .if .xmatch(.left(1, {_RIGHT}), a)
-            rightReg .set ___math::REGA
+            requestReg .set ___math::REGA
         .elseif .xmatch(.left(1, {_RIGHT}), x)
-            rightReg .set ___math::REGX
+            requestReg .set ___math::REGX
         .elseif .xmatch(.left(1, {_RIGHT}), y)
-            rightReg .set ___math::REGY
+            requestReg .set ___math::REGY
         .else
             ; no match on right, use any register that may have been found on the left
-           rightReg .set leftReg
+           requestReg .set leftReg
         .endif
     .endif
     
     ; look for any simple math operations on the right side, 
     ; call will output any LOAD first, evaluate any operations
     ; from left to right
-    .if rightReg
-        ___evalMathOp {_RIGHT}, rightReg
+    .if requestReg
+        ___evalMathOp {_RIGHT}, requestReg
     .else
         ___evalMathOp {_RIGHT}
     .endif
     ; override right side reg if ___evalMathOp changed/set it:
-    rightReg .set ___math::regFound
+    requestReg .set ___math::regFound
     
     .if !leftReg ; no register defined? just store: 
-        .if rightReg = ___math::REGA
-            sta {_LEFT}
-        .elseif rightReg = ___math::REGX
-            stx {_LEFT}
-        .elseif rightReg = ___math::REGY
-            sty {_LEFT}
+        .if requestReg = ___math::REGA
+            sta _LEFT
+        .elseif requestReg = ___math::REGX
+            stx _LEFT
+        .elseif requestReg = ___math::REGY
+            sty _LEFT
         .endif
     .elseif leftReg = ___math::REGA
-        .if rightReg = ___math::REGX
+        .if requestReg = ___math::REGX
             txa
-        .elseif rightReg = ___math::REGY
+        .elseif requestReg = ___math::REGY
             tya
         .endif
     .elseif leftReg = ___math::REGX
-        .if rightReg = ___math::REGA
+        .if requestReg = ___math::REGA
             tax
-        .elseif rightReg = ___math::REGY
+        .elseif requestReg = ___math::REGY
             ___error "Cannot do 'x := y' type move."
         .endif
     .elseif leftReg = ___math::REGY
-        .if rightReg = ___math::REGA
+        .if requestReg = ___math::REGA
             tay
-        .elseif rightReg = ___math::REGX
+        .elseif requestReg = ___math::REGX
             ___error "Cannot do 'y := x' type move."
         .endif
     .endif
@@ -856,6 +878,349 @@
    .undefine _LEFT
    .undefine _RIGHT
    .undefine _EXP
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Macro for copying parameters.
+; This will output the appropriate amount of load/store instructions
+; Arguments: CPU register to use, source, destination, dest. size, source size, and immediate mode flag
+; Source must be the same size or smaller then the dest.
+; If the source is smaller, load a zero, skip further loads, and fill the destination with zero
+; We could optionally sign extend, not implemented yet.
+; Arguments don't need error checking, should be valid from calling macro
+
+.scope ___moveWord
+    previousImm .set 0
+.endscope
+
+; small macro for ___moveMem_ca65hl macro, to skip loading the same immediate value if possible
+.macro ___LOAD_imm_ca65HL value
+
+    .if .const(value)
+        .if .not ( value = ___moveWord::previousImm )
+            LOAD # ( value )
+            ___moveWord::previousImm .set value 
+        .endif
+    .else
+        LOAD # ( value )
+    .endif
+    
+.endmacro
+
+.macro ___moveMem_ca65hl reg, source, dest, destsize, sourcesize, imm
+
+    .local sourcecount
+    sourcecount .set sourcesize
+
+    .if .xmatch(reg, a)
+        .define LOAD  lda
+        .define STORE sta
+    .elseif .xmatch(reg, x) 
+        .define LOAD  ldx
+        .define STORE stx
+    .else
+        .define LOAD  ldy
+        .define STORE sty
+    .endif
+    
+    ; set to a value that couldn't fit into one byte to avoid matching the first byte
+    ___moveWord::previousImm .set $0100
+    
+    .if imm
+        .repeat destsize, i
+                ; nothing to do for source if sourcecount is -1
+                .if sourcecount <> -1 
+                    .if sourcecount = 0
+                        LOAD #0
+                    .else
+                        ___LOAD_imm_ca65HL <( ( source ) >> (8 * i) )
+                    .endif
+                    sourcecount .set sourcecount - 1
+                .endif
+                STORE i+dest
+        .endrepeat
+    .else
+        .repeat destsize, i
+                ; nothing to do for source if sourcecount is -1
+                .if sourcecount <> -1 
+                    .if sourcecount = 0
+                        LOAD #0
+                    .else   
+                        LOAD i + source
+                    .endif
+                    sourcecount .set sourcecount - 1
+                .endif
+                STORE i+dest
+        .endrepeat
+    .endif
+    
+    .undefine LOAD
+    .undefine STORE
+    
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: mw register, exp
+;
+; Parameters:
+;    register - Optional - register to use 
+;    exp - expression to process
+;
+;   Simple support for moving 16 bits as address or immediate.
+;   Can accept one parameter. If no register passed, register to use will be searched for, 
+;   or register A will be used by default. (The macro will adjust arguments if exp is empty).
+
+.macro mw register, exp
+
+    .local parameterDestSize  
+    .local parameterSourceSize 
+    .local immMode
+    .local castbase
+    .local requestReg
+    .local pos
+    requestReg  .set 0
+    parameterDestSize   .set 0  ; size of memory for parameter to be loaded
+    parameterSourceSize .set 0  ; size of source data
+    immMode .set 0              ; if copy should be immediate mode
+    destIsReg .set 0            ; if the destination matched a register
+    sourceIsReg .set 0          ; if the source matched a register
+    pos .set 0
+    
+    .ifblank exp
+        .define _EXP () register
+    .else
+        ; register passed in 'register':
+        .define _EXP () exp
+        .if .xmatch(register, a)
+            requestReg .set ___math::REGA
+        .elseif .xmatch(register, x)
+            requestReg .set ___math::REGX
+        .elseif .xmatch(register, y)
+            requestReg .set ___math::REGY
+        .else
+            ___error "Unknown register."
+        .endif
+    .endif
+    printTokenListDebug {MB_:REG_: register | EXP_:exp}	
+
+    ; find assignment token: (accept := or =)
+    ___findToken {_EXP}, =, pos
+    .if !pos
+        ___findToken {_EXP}, :=, pos
+    .endif
+    .if !pos
+        ___error "No assignment."
+    .endif
+    
+    .define _T_DEST_ .mid(0, pos, {_EXP})
+    .define _T_SOURCE_ .mid(pos + 1, .tcount({_EXP}) - pos - 1, {_EXP})
+    ; for now, this will always be two for 16 bit move, keep as 'variable' to allow future changes
+    parameterDestSize .set 2
+    
+    ; --------------------------------------------------------------------------------------------
+    ; find destination
+
+    .if .xmatch( { _T_DEST_ }, { ax } ) || .xmatch( { _T_DEST_ }, { ay } ) || .xmatch( { _T_DEST_ }, { xy } )     
+        .define _DEST_ _T_DEST_
+        destIsReg .set 1
+        ; for nicer error messages:
+        .if .xmatch(_T_DEST_,ax) 
+            .define _DEST_STR_ "register ax"
+        .elseif .xmatch(_T_DEST_,ay) 
+            .define _DEST_STR_ "register ay"
+        .elseif .xmatch(_T_DEST_,xy) 
+            .define _DEST_STR_ "register xy"
+        .endif
+    .else
+        .define _DEST_ _T_DEST_
+        .define _DEST_STR_ ""
+    .endif
+    
+    ; --------------------------------------------------------------------------------------------
+    ; find source
+
+    .if .xmatch( {.left(1, {_T_SOURCE_} ) } , {&} ) 
+            parameterSourceSize .set 2
+            immMode .set 1
+            ; remove the '&'
+            .define _SOURCE_ .mid(1, .tcount( {_T_SOURCE_} ) - 1 , {_T_SOURCE_})
+        ; Check if source is an immediate value:
+    .elseif .xmatch( .left(1,{_T_SOURCE_}), # ) ; if immediate
+        immMode .set 1
+        ; remove the '#'
+        .define _SOURCE_ .mid(1, .tcount( {_T_SOURCE_} ) - 1 , {_T_SOURCE_})
+        ; check if there is a constant
+        .if .const( _SOURCE_ ) 
+            .if ( _SOURCE_ & $FFFF0000 ) 
+                parameterSourceSize .set 4
+            .elseif ( _SOURCE_ & $FF00 )
+                parameterSourceSize .set 2
+            .else
+                parameterSourceSize .set 1
+            .endif
+        .else ; not a constant, so just match destination size. 
+            parameterSourceSize .set parameterDestSize
+        .endif
+    
+    ; Check if source is using a size cast:
+    .elseif .xmatch( .left( 1, {_T_SOURCE_}), {(} ) ; size cast
+        .if .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .byte )
+            castbase .set 1
+        .elseif .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .word ) || .xmatch( .mid(1, 1 , {_T_SOURCE_}) ,  .addr )
+            castbase .set 2
+        .elseif .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .dword )
+            castbase .set 4
+        .else
+            .error "Size expected for cast: .byte, .word, .addr or .dword"
+            .fatal "STOP"
+        .endif    
+        
+        .if .match( .mid( 2, 1 , {_T_SOURCE_}), 1) ; number
+            castbase .set castbase * .mid(2, 1 , {_T_SOURCE_})
+            .if .not .xmatch( .mid( 3, 1 , {_T_SOURCE_}), {)} )
+                .error "`)` expected."
+                .fatal "STOP"
+            .endif
+            .define _SOURCE_ .mid( 4, .tcount( {_T_SOURCE_} ) - 4 , {_T_SOURCE_})
+        .else ; no number in cast
+            .if .not .xmatch( .mid( 2, 1 , {_T_SOURCE_}), {)} )
+                .error "`)` expected."
+                .fatal "STOP"
+            .endif
+            .define _SOURCE_ .mid( 3, .tcount( {_T_SOURCE_} ) - 3 , {_T_SOURCE_})
+        .endif
+        parameterSourceSize .set castbase
+    
+    .else
+        ; Start here: no leading tokens to skip due to not address operator, not immediate, not cast size:
+        .define _SOURCE_  _T_SOURCE_
+        
+        ; is source a register?
+        ; if not check for other operators supported:
+        ; < for lowbyte
+        ; > for high bye
+        ; otherwise check for an identifier and find its size if possible
+        
+        ; default:
+        ; size of ident may be difficult to determine, so default to this for ca65 to evaluate later and copy parameterDestSize number of bytes:
+        parameterSourceSize .set parameterDestSize
+            
+        ; see if we can determine the size:
+        
+        ; Check if register:
+        .if .xmatch(_SOURCE_,a) || .xmatch(_SOURCE_,x) || .xmatch(_SOURCE_,y)
+            parameterSourceSize .set 1
+            sourceIsReg .set 1
+        .elseif .xmatch(_SOURCE_,ax) || .xmatch(_SOURCE_,ay) || .xmatch(_SOURCE_,xy)
+            parameterSourceSize .set 2
+            sourceIsReg .set 1
+        ; Check if lowbyte or high byte operator: <, >
+        .elseif .xmatch( {.left(1, {_SOURCE_} ) } , {<} ) || .xmatch( {.left(1, {_SOURCE_} ) } , {>} )
+            parameterSourceSize .set 1
+            
+        ; see if we can get the size of an single token ident. ca65 is funny with scoping due to one pass, not much more can easily be done.
+        ; could be more strict with checking ident. sizes, but it would require calls to use explicit scoping or casting idents.
+        .elseif .tcount( { _SOURCE_ } ) = 1
+            .if .match( { _SOURCE_ }, 1234 ) ; number: load from address
+                .if _SOURCE_ >= 0 && _SOURCE_ <= $FFFF
+                    parameterSourceSize .set parameterDestSize
+                .else
+                    .error "Address out of range."
+                .endif
+            .elseif .defined ( _SOURCE_ )
+                parameterSourceSize .set .sizeof(  _SOURCE_  )
+            .endif
+        .endif
+    .endif
+    
+    ; error if source is bigger than dest.
+    .if parameterSourceSize > parameterDestSize
+        .error .sprintf( "Parameter overflow for '%s'. Parameter size: %d bytes. Passed value size: %d bytes.", _DEST_STR_, parameterDestSize, parameterSourceSize)
+        .fatal "STOP"
+    .endif
+    
+    ; check for register parameters not supported:
+    .if destIsReg && sourceIsReg && ( parameterSourceSize > 1 || parameterDestSize > 1 )
+        ; this is an error, unless register parameters match (copy/move not required)
+        .if .not (.xmatch(_SOURCE_, _DEST_)) 
+            .error .sprintf("Register parameter %s: Not supported with register source.", .string(_DEST_))
+            .fatal "STOP"
+        .endif
+    .endif
+    
+    ; if source is a CPU reg. and destination is not a register: (assume it is memory)
+    .if (.xmatch( _SOURCE_, a) || .xmatch( _SOURCE_, x) || .xmatch( _SOURCE_, y) ) && (.not destIsReg)
+        .if .xmatch( _SOURCE_, a) ; if the source is reg.a:
+            sta _DEST_
+        .elseif .xmatch( _SOURCE_, x) ; if the source is reg.x:
+            stx _DEST_
+        .elseif .xmatch( _SOURCE_, y) ; if the source is reg.y
+            sty _DEST_
+        .endif   
+        ; check if _DEST_ memory size is bigger than one byte and warn
+        .if parameterDestSize > 1
+            .warning "MW: Register source size is 1 byte: High bytes not set."
+        .endif
+    .elseif (.xmatch( _SOURCE_, ax) || .xmatch( _SOURCE_, ay) || .xmatch( _SOURCE_, xy) ) && (.not destIsReg)
+        .if .xmatch( _SOURCE_, ax) ; if the source is ax:
+            sta _DEST_
+            stx _DEST_ + 1
+        .elseif .xmatch( _SOURCE_, ay) ; if the source is ay:
+            sta _DEST_
+            sty _DEST_ + 1
+        .elseif .xmatch( _SOURCE_, xy) ; if the source is xy:
+            stx _DEST_
+            sty _DEST_ + 1
+        .endif   
+    .elseif (.not destIsReg ) && (.not sourceIsReg ) ; if destination and source is not a register, it is memory
+        ; check which register is open for moving memory
+        ; we don't have to mark it as used, because it is not holding a value that matters if not already marked
+        .if requestReg = ___math::REGY
+            ___moveMem_ca65hl y, _SOURCE_, _DEST_, parameterDestSize, parameterSourceSize, immMode
+        .elseif requestReg = ___math::REGX
+            ___moveMem_ca65hl x, _SOURCE_, _DEST_, parameterDestSize, parameterSourceSize, immMode
+        .else
+            ___moveMem_ca65hl a, _SOURCE_, _DEST_, parameterDestSize, parameterSourceSize, immMode
+        .endif       
+    .elseif .xmatch( _DEST_, ax) ; if the dest. is reg.ax:
+        .if .not sourceIsReg ; if source is not a register, assume it is memory
+            .if immMode
+                lda # <_SOURCE_
+                ldx # >_SOURCE_
+            .else
+                lda _SOURCE_
+                ldx _SOURCE_ + 1
+            .endif   
+        .endif
+    .elseif .xmatch( _DEST_, ay) ; if the dest. is reg.ay:
+        .if .not sourceIsReg ; if source is not a register, assume it is memory
+            .if immMode
+                lda # <_SOURCE_
+                ldy # >_SOURCE_
+            .else
+                lda _SOURCE_
+                ldy _SOURCE_ + 1
+            .endif   
+        .endif
+    .elseif .xmatch( _DEST_, xy) ; if the dest. is reg.xy:
+        .if .not sourceIsReg ; if source is not a register, assume it is memory
+            .if immMode
+                ldx # <_SOURCE_
+                ldy # >_SOURCE_
+            .else
+                ldx _SOURCE_
+                ldy _SOURCE_ + 1
+            .endif   
+        .endif
+    .endif    
+    
+    .undefine _EXP
+    .undefine _DEST_STR_
+    .undefine _SOURCE_
+    .undefine _DEST_
+    .undefine _T_DEST_
+    .undefine _T_SOURCE_
+    
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1093,7 +1458,7 @@
     .local statementTokenCount          ;  token count for found statement
     .local foundAND                     ;  flag: found an && when scanning ahead while considering if bracket set is negated
     .local foundOR                      ;  flag: found an || when scanning ahead while considering if bracket set is negated
-    .local useLongJump                  ;  flag: set true if macro param. branchtype is 'long' or if omitted set to true if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
+    .local useLongJump                  ;  flag: set true if option for 'long', branch is a backward branch, or if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
     .local chainedFlag                  ;  flag: branch to next enclosing ENDIF for ELSE and ELSEIF structures
     .local longJumpNotNeeded            ;  flag: true if long jump is not needed for this branch. False means long branch needed or unknown if needed for forward branch
 
@@ -1158,7 +1523,7 @@
     ; skip the first '('
     nextToken
     bracketLevel .set 1
-    .repeat .tcount({condition})
+    .repeat .tcount({condition}) - 1
         .if xmatchToken {(}
             .if bracketLevel = 0
                 ___error "Mismatched parenthesis."
@@ -1221,7 +1586,16 @@
         .endif
     .endif
     
-    ; no long jump option passed, use setLongBranch setting:
+    ; --------------------------------------------------------------------------------------------
+    ; Warn of unneeded long or short setting passed to the macro
+    .if useLongJump <> -1
+        .ifdef destinationLabel
+            depreciateLongBranch
+        .endif
+    .endif
+    
+    ; --------------------------------------------------------------------------------------------
+    ; no long jump option passed, check for long branches if backward branch, or use setLongBranch setting
     .if useLongJump = -1
         .ifdef destinationLabel ; if backward branch, assume long jump could be needed and check during branch generation
             useLongJump .set 1
@@ -1398,15 +1772,13 @@
                 .ifndef firstBranchToLongJump
                     firstBranchToLongJump = * + 2 ; address for end of next branch
                 .endif
-                .if foundAND || foundOR
-                    .if foundAND
-                        ; branch to failed on inverted condition
-                        .define branchToLabel exitBranchEvaluation 
-                    .else ; foundOR
-                        .define branchToLabel doLongJump
-                    .endif
+                .if foundAND
+                    ; branch to failed on inverted condition
+                    .define branchToLabel exitBranchEvaluation 
+                .elseif foundOR
+                    .define branchToLabel doLongJump
                 .else
-                    ; no AND or OR found that affects this branch, skip the JMP on inverted test
+                    ; no AND or OR found that affects this branch: single or last condition => skip the JMP on inverted test
                     ___invertBranchCondition
                     .define branchToLabel exitBranchEvaluation
                 .endif
@@ -1432,16 +1804,9 @@
         doLongJump:
         jmp destinationLabel
         .if FLOW_CONTROL_VALUES::LONG_JUMP_WARNINGS
-            ; if destinationLabel is defined it means this is a branch to a lower address
-            ; ( this assert should never trigger since the introduction of automatic long backward branches.. to be removed? )
-            .ifdef destinationLabel
-                .define longJumpAssert() doLongJump - destinationLabel > 128
-            .else ; a branch to a higher address:
-                ; - 3 for the 'jmp destinationLabel' command that wouldn't be here if setLongBranch -
-                .define longJumpAssert() destinationLabel - firstBranchToLongJump - 3 > 127
-            .endif
-            .assert longJumpAssert, warning, "Branch can be reached without a long branch. (Try 'setLongBranch -')."
-            .undefine longJumpAssert
+            .ifndef destinationLabel
+                .assert destinationLabel - firstBranchToLongJump - 3 > 127, warning, "Branch can be reached without a long branch. (Try 'setLongBranch -')."
+            .endif    
         .endif
     .endif
     
@@ -1503,7 +1868,7 @@
     
 .macro ___checkForTailJMP knownFlagStatus
     .ifdef ::_CUSTOM_SYNTAX_        
-        .if .xmatch( knownFlagStatus, jmp)
+        .if .xmatch( knownFlagStatus, jmp )
             .if _CUSTOM_::JMP_INSTRUCTION_COUNTER > 0
                 .assert ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER - 1)) = *, warning, "No JMP immediately before ELSE/ELSEIF, possibly bad 'jmp' option."
             .else
@@ -1524,9 +1889,10 @@
 ;
 ;   condition - Conditional expression to evaluate.
 ;
-;   knownFlagStatus - Optional - if a flag is known to be in a state when the elseif
-;                     is encountered, branch to the end if using this flag as a branch 
-;                     always, using the syntax for <setBranch>
+;   options   - In any order, 'long', 'short', 'jmp', or flag status.If a flag is known to be in a state when the elseif is encountered, 
+;               branch to the end if using this flag as a branch, using the syntax for <setBranch>.
+;               If 'long' or 'short', force long or short branch to the end of the code block.
+;               'jmp' to suppress the output of a jmp to the endif.
 ;
 ;   See Also:
 ;   <setBranch>, <endif>, <if>, <else>
@@ -1574,7 +1940,7 @@
     
     ; if something found, define the options:
     .if knownFlagStatusOptionNumber <> -1
-        .define knownFlagStatus()   .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", knownFlagStatusOptionNumber)))
+        .define knownFlagStatus()   .left(1, .ident(.sprintf("_ELSEIF_OPT%d_",  knownFlagStatusOptionNumber)))
         .define branchtype()        .left(1, .ident(.sprintf("_ELSEIF_OPT%d_", !knownFlagStatusOptionNumber)))
     .else
         .define knownFlagStatus
@@ -2122,6 +2488,7 @@
         gotoMode = 0
     .endif
     
+    .define DECREMENT_COMMAND dex   ; default
     .if !gotoMode
         .if .xmatch( reg, a )
             ;
@@ -2138,13 +2505,15 @@
         .if .xmatch( reg, x )
             .define INDEX_REG_FOR_TABLE x
             .define SWITCH_INFO_REG "none"
-        .elseif  .xmatch( reg, a )
+        .elseif .xmatch( reg, a )
             tax
             .define INDEX_REG_FOR_TABLE x
             .define SWITCH_INFO_REG "X"
-        .elseif  .xmatch( reg, y )
+        .elseif .xmatch( reg, y )
             .define INDEX_REG_FOR_TABLE y
             .define SWITCH_INFO_REG "none"
+            ;.undefine DECREMENT_COMMAND
+            ;.define DECREMENT_COMMAND dey
         .else 
             ldx reg
             .define INDEX_REG_FOR_TABLE x
@@ -2162,7 +2531,8 @@
         loop:
             cmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
             beq found
-            dex  
+            ;DECREMENT_COMMAND  
+            dex
         bpl loop
         jmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER))
         found:
@@ -2179,6 +2549,7 @@
     FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER + 1
     .undefine INDEX_REG_FOR_TABLE
     .undefine SWITCH_INFO_REG
+    .undefine DECREMENT_COMMAND
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
