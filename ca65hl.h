@@ -30,25 +30,42 @@
 ;
 ; > setBranch
 ; > setLongBranch
-; > mb
+; > mb  (Move Byte)
+; > mw  (Move Word)
 ; > if
 ; > else
 ; > elseif
 ; > endif
-; > do..while
-; > repeat..until
+; > do
+; > while
+; > repeat
+; > until
+; > forever
 ; > while <> do
 ; > endwhile
 ; > break
 ; > for..next
 ; > switch..case..endswitch
 
+; --------------------------------------------------------------------------------------------
+
 .ifndef ::_CA65HL_H_
 ::_CA65HL_H_ = 1
 
+; Set the following to 0 to disable customSyntax for instructions:
+; ::__CA65HL_USE_CUSTOM_SYNTAX__ = 0
+
+; Set the following for warnings from ca65hl: (0 to 2)
+; ::__CA65HL_WARNING_LEVEL__ = 0
+
+; Set the following for console output for debugging ca65hl (WIP)
+; ::__DEBUG_CA65HL__ = 1
+
+; --------------------------------------------------------------------------------------------
+
 ; Include macros to enable custom array syntax for instructions
-.ifndef ::_CA65HL_USE_CUSTOM_SYNTAX_
-    ::_CA65HL_USE_CUSTOM_SYNTAX_ = 1
+.ifndef ::__CA65HL_USE_CUSTOM_SYNTAX__
+    ::__CA65HL_USE_CUSTOM_SYNTAX__ = 1
 .endif
 
 ; Warn in some cases if turned on:
@@ -56,22 +73,42 @@
     ::__CA65HL_WARNING_LEVEL__ = 2
 .endif
 
-; --------------------------------------------------------------------------------------------
 ; debugging for this file only. Change this to '1' for some console output.
-::__DEBUG_CA65HL__ = 0
-.macro printTokenListDebug parameter
-    .if ::__DEBUG_CA65HL__
-        printTokenList {parameter}
-    .endif
-.endmacro
+.ifndef ::__DEBUG_CA65HL__
+    ::__DEBUG_CA65HL__ = 0
+.endif
 
 ; --------------------------------------------------------------------------------------------
 .include "stacks.h"             ; macros that allow for named stacks 
 .include "tokeneval.h"          ; macros to make token evaluation easier
 .include "debug.h"              ; macros to help with debugging
-.if ::_CA65HL_USE_CUSTOM_SYNTAX_
+.if ::__CA65HL_USE_CUSTOM_SYNTAX__
     .include "customSyntax.h"   ; macros to enable allow custom syntax for instructions
 .endif
+
+; --------------------------------------------------------------------------------------------
+; symbols to track some values for if, loops and break
+
+.scope FLOW_CONTROL_VALUES
+    IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
+    LAST_ENDIF_COUNT                    .set 0  ; keep track of the count of last IF-ENDIF block
+    DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
+    WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
+    FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
+    SWITCH_STATEMENT_COUNTER            .set 0  ; switch statement counter
+    SWITCH_STATEMENT_DATA_SEG           .set 0  ; flag: if on, use data segment defined by setSwitchStatementDataSeg
+    NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
+    IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
+    LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
+    LONG_JUMP_WARNINGS                  .set 1  ; flag: output warnings if long jump not needed
+    INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
+    BREAK_COUNT_DOWHILE                 .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
+    BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
+    LOOP_TYPE_DEFINED                   .set 0  ; flag: only undefine ___loopType if set
+    PRINT_LABELS                        .set 0  ; send macro generated labels to console
+.endscope
 
 ; --------------------------------------------------------------------------------------------
 ; Substitutes for branch mnemonics. Edit or add to as desired.
@@ -93,6 +130,65 @@
 .define bitset             !Z
 .define greater             G        ; Use greater and less/equal macros
 .define lessORequal        !G
+
+; --------------------------------------------------------------------------------------------
+; Function: printTokenListDebug
+;
+; Parameters:
+;
+;   parameter - token list to be displayed. Enclose in {} to include commas
+;
+;   If the option is enabled, ca65hl will display some information to the console
+;   on what it is processing.
+
+.macro printTokenListDebug parameter
+    .if ::__DEBUG_CA65HL__
+        printTokenList {parameter}
+    .endif
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ca65hl_Listing param, tok, position
+;
+; Parameters:
+;
+;   opt1 -  Must be 'on' or 'off' (not in quotes) to turn listing on or off.
+;   comment - String to print as a comment to the console
+;
+;   This macro turns on or off the listing of instructions and labels to the console.
+
+.macro ca65hl_Listing opt1, comment
+    .if .xmatch( opt1, on )
+        FLOW_CONTROL_VALUES::PRINT_LABELS .set 1
+    .elseif .xmatch( opt1, off )
+        FLOW_CONTROL_VALUES::PRINT_LABELS .set 0
+    .else
+        .error "Invalid option. Should be: 'on' or 'off'."
+    .endif
+    .if ::__CA65HL_USE_CUSTOM_SYNTAX__
+        customSyntax_Output opt1
+    .endif
+    .ifnblank comment
+        .out .concat("; ", comment)
+    .endif
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ___emitLabel
+;
+; Parameters:
+;
+;   labelName - name of label as a string
+;
+;   This macro creates a label with the name of the string, as well as optionally
+;   printing the label to the console.
+
+.macro ___emitLabel labelName
+    .if FLOW_CONTROL_VALUES::PRINT_LABELS
+        .out .concat(labelName, ":")
+    .endif
+    .ident(labelName):
+.endmacro
 
 ; --------------------------------------------------------------------------------------------
 ; Function: ___findToken param, tok, position
@@ -311,29 +407,6 @@
     .undefine branchFlag
     .undefine branchCondition
 .endmacro
-
-; --------------------------------------------------------------------------------------------
-; symbols to track some values for if, loops and break
-
-.scope FLOW_CONTROL_VALUES
-    IF_STATEMENT_COUNT                  .set 0  ; if statement label counter - always incremented after every 'if'
-    LAST_ENDIF_COUNT                    .set 0  ; keep track of the count of last IF-ENDIF block
-    DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
-    WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
-    FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
-    SWITCH_STATEMENT_COUNTER            .set 0  ; switch statement counter
-    SWITCH_STATEMENT_DATA_SEG           .set 0  ; flag: if on, use data segment defined by setSwitchStatementDataSeg
-    NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
-    IF_STATEMENT_ACTIVE                 .set 0  ; flag: if executing an 'if' macro (no calling an 'if' while a condition is being processed)
-    LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
-    LONG_JUMP_WARNINGS                  .set 1  ; flag: output warnings if long jump not needed
-    INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
-    BREAK_COUNT_DOWHILE                 .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
-    LOOP_TYPE_DEFINED                   .set 0  ; flag: only undefine ___loopType if set
-.endscope
 
 ; --------------------------------------------------------------------------------------------
 ; Function: setLongBranch
@@ -1635,7 +1708,7 @@
             .repeat branchLabelCounter, i   ; branchLabelCounter starts at 0 and is post incremented for the next (yet to be defined) index
                 .if tokenPositionForBranchLabel{i} = currentTokenNumber
                     .ifndef .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber ))
-                        .ident( .sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber )):
+                        ___emitLabel .sprintf( "IF_STATEMENT_%04X_BRANCH_TO_TOKEN_%02X", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT, currentTokenNumber )
                     .endif
                 .endif
             .endrepeat
@@ -1967,11 +2040,11 @@
     ; if not defined, it means there are no previous ELSEIF, so create a label for the originating IF 
     .ifndef ELSE_IF_COUNT
         ; set the endif label for the original IF:
-        .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )
         ELSE_IF_COUNT .set -1 ; start at -1, will be incremented to 0
     .else
         ; this isn't the first ELSEIF: 
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )
     .endif
     
     ELSE_IF_COUNT .set ELSE_IF_COUNT + 1
@@ -2034,10 +2107,10 @@
     ; if ELSE_IF_COUNT is defined, means there are one or more ELSEIF, so create a label for the last one,
     ; otherwise, create a label for the originating IF
     .ifdef ELSE_IF_COUNT
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )
         ELSE_IF_COUNT .set -1 ; signal it is not needed for the endif macro
     .else
-        .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )
     .endif
     
     .undefine ELSE_IF_COUNT
@@ -2067,17 +2140,17 @@
     ; if label was referenced, it means there was an ELSE or ELSEIF, so create the label,
     ; otherwise, create a label for the originating IF
     .ifref .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT ))
-        .ident( .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ELSE_ENDIF_LABEL", IF_STATEMENT_COUNT )
         ; if there was an ELSEIF and last ELSEIF label not handled by an ELSE:
         .define ELSE_IF_COUNT .ident( .sprintf("IF_STATEMENT_%04X_ELSEIF_COUNT", IF_STATEMENT_COUNT))
         .ifdef ELSE_IF_COUNT
             .if ELSE_IF_COUNT <> -1 ; -1 means ELSE handled the last ELSEIF label
-                .ident( .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )):
+                ___emitLabel .sprintf( "IF_STATEMENT_%04X_ELSEIF_LABEL_%04X", IF_STATEMENT_COUNT, ELSE_IF_COUNT )
             .endif
         .endif
         .undefine ELSE_IF_COUNT 
     .else
-        .ident( .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )):
+        ___emitLabel .sprintf( "IF_STATEMENT_%04X_ENDIF_LABEL", IF_STATEMENT_COUNT )
     .endif
     FLOW_CONTROL_VALUES::LAST_ENDIF_COUNT .set IF_STATEMENT_COUNT
 .endmacro
@@ -2091,7 +2164,7 @@
 
 .macro do
     stackPush "DO_WHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
-    .ident( .sprintf( "DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)):
+    ___emitLabel .sprintf( "DO_WHILE_LOOP_LABEL_%04X", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
     ___pushLoopType "DOWHILE"
 .endmacro
@@ -2203,7 +2276,7 @@
 .macro while_do condition, branchtype
     ___pushLoopType "WHILEDO"
     stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
-    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
+    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}, branchtype
@@ -2241,7 +2314,7 @@
     .else
         jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_START_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
     .endif
-    .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)):
+    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_LOOP_EXIT_LABEL_%04X", WHILE_DO_ENDWHILE_STATEMENT_COUNT)
     ___popLoopType
     ___generateBreakLabel
 .endmacro
@@ -2348,7 +2421,7 @@
         .endif
     .elseif _BREAK_STATEMENT_COUNT >= 0
         stackPop .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT
-        .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, _BREAK_STATEMENT_COUNT)):
+        ___emitLabel .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, _BREAK_STATEMENT_COUNT)
         ___generateBreakLabel _BREAK_STATEMENT_COUNT
         FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) .set FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) + 1
     .endif
@@ -2395,20 +2468,23 @@
     ; execute the INIT, before the loop
     ___evaluateStatementList {INIT}
     
+    ; check for 'strict' and save this FOR loop's strict status to determine if NEXT will need a label generated
     .ifnblank op1
         .if !.xmatch(op1, strict)
             ___error "Expected: 'strict': Test condition before first loop is executed."
         .endif
+        stackPush "FOR_STATEMENT_STRICT", 1
         jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER))
+    .else
+        stackPush "FOR_STATEMENT_STRICT", 0
     .endif
-    .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER)):
+    ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER)
     
     stackPush "FOR_STATEMENT_STACK", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER
     FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER + 1
     
     pushTokenList "FOR_STATEMENT_CONDITION", {COND}
     pushTokenList "FOR_STATEMENT_INCREMENT", {INCR}
-    
     ; --------------------------------------------------------------------------------------------
     .undefine INCR
     .undefine INIT
@@ -2425,15 +2501,21 @@
 
 .macro next branchtype
     .local FOR_STATEMENT_COUNTER
+    .local FOR_STATEMENT_STRICT_STATUS
+    
     stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
+    stackPop "FOR_STATEMENT_STRICT", FOR_STATEMENT_STRICT_STATUS
     .if FOR_STATEMENT_COUNTER < 0
         ___error "'next' without 'for'."
     .endif
     ; if FOR_STATEMENT_STACK is valid, then popTokenList should be too:
     popTokenList "FOR_STATEMENT_INCREMENT"
     ___evaluateStatementList {poppedTokenList}
-    ; jmp here on strict:
-    .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
+    .if FOR_STATEMENT_STRICT_STATUS
+        ; jmp here on strict:
+        ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)
+    .endif
+    ; .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
     if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, branchtype
@@ -2580,7 +2662,7 @@
         .if .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER))
             ___error "Default case not valid in 'goto' mode."
         .endif
-            .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
+            ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)
         .exitmacro
     .endif
         
@@ -2615,7 +2697,7 @@
     .endif
 
     ;label for this case:
-    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, thisSwitchCaseCounter)):    
+    ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, thisSwitchCaseCounter)
     thisSwitchCaseCounter .set thisSwitchCaseCounter + 1
     
     .undefine thisSwitchCaseCounter
@@ -2671,20 +2753,20 @@
     
     ; make constant table if not goto mode
     .if !.ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", SWITCH_STATEMENT_COUNTER))
-        .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", SWITCH_STATEMENT_COUNTER)):
+        ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", SWITCH_STATEMENT_COUNTER)
         .repeat thisSwitchCaseCounter, i
             .byte .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_CONSTANT", SWITCH_STATEMENT_COUNTER, i))
         .endrepeat
     .endif
     
     ; make lobyte table:
-    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_LOBYTES", SWITCH_STATEMENT_COUNTER)):
+    ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_LOBYTES", SWITCH_STATEMENT_COUNTER)
     .repeat thisSwitchCaseCounter, i
         .byte <( .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, i)) - 1 )
     .endrepeat
     
     ; make hibyte table:
-    .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_HIBYTES", SWITCH_STATEMENT_COUNTER)):
+    ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_HIBYTES", SWITCH_STATEMENT_COUNTER)
     .repeat thisSwitchCaseCounter, i
         .byte >( .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_CASE_%02X_LABEL", SWITCH_STATEMENT_COUNTER, i)) - 1 )
     .endrepeat
@@ -2698,7 +2780,7 @@
     exit:
     ; if no matches, 'switch' macro will jump here if no default case:
     .ifndef .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER))
-        .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)):
+        ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNTER)
     .endif
     ___popLoopType
     ___generateBreakLabel
