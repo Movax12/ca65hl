@@ -63,10 +63,20 @@
 .feature ubiquitous_idents ; allow overloading mnemonics
 
 .scope _CUSTOM_
-    JMP_INSTRUCTION_COUNTER .set 0  ; count
-    EVALINSTRLISTCOUNT    .set 0  
+    JMP_INSTRUCTION_COUNTER     .set 0  ; count
+    EVALINSTRLISTCOUNT          .set 0  
+    OUTPUT_CUSTOM_SYNTAX        .set 0
 .endscope
 
+.macro customSyntax_Output opt1
+    .if .xmatch( opt1, on )
+        _CUSTOM_::OUTPUT_CUSTOM_SYNTAX .set 1
+    .elseif .xmatch( opt1, off )
+        _CUSTOM_::OUTPUT_CUSTOM_SYNTAX .set 0
+    .else
+        .error "Invalid option. Should be: 'on' or 'off'."
+    .endif
+.endmacro
 ; --------------------------------------------------------------------------------------------
 ; Function: ___findToken param, tok, position
 ;
@@ -132,85 +142,91 @@
     reg     .set 0
     regPos  .set 0
     
+    ; Only use custom syntax if there was no comma
     ; if index was passed, treat as normal 6502 syntax and quit, since this syntax does not use commas
-    .ifnblank index
-        instr op, index
-        .exitmacro
-    .endif
-    
-    ___findToken {op}, [, open
-    ; also check if position 0 is valid for open, since ___findToken won't find the first position
-    .if open || .xmatch ( .left(1, {op}), [ )
-        ___findToken {op}, ], close
-        .if close
-            ; look for '[ x +' type pattern
-            .if .xmatch( {.mid(open + 1, 1 ,{op})}, x)
-                reg .set REGX
-            .elseif .xmatch( {.mid(open + 1, 1 ,{op})}, y)
-                reg .set REGY
-            .endif
-            .if reg
-                ; require a +/-, but allow '[y]' or '[x]' if nothing else: 
-                ; if only a 'y' or 'x', define the constant as nothing
-                .if open + 2 = close
-                    .define _CONST 
-                    ; next has to be a + or -, or it is an error
-                .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, +)
-                    .define _CONST + (.mid(open + 3, close - open - 3 ,{op}))
-                .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, -)
-                    .define _CONST - (.mid(open + 3, close - open - 3 ,{op}))
+    .ifblank index
+        ___findToken {op}, [, open
+        ; also check if position 0 is valid for open, since ___findToken won't find the first position
+        .if open || .xmatch ( .left(1, {op}), [ )
+            ___findToken {op}, ], close
+            .if close
+                ; look for '[ x +' type pattern
+                .if .xmatch( {.mid(open + 1, 1 ,{op})}, x)
+                    reg .set REGX
+                .elseif .xmatch( {.mid(open + 1, 1 ,{op})}, y)
+                    reg .set REGY
+                .endif
+                .if reg
+                    ; require a +/-, but allow '[y]' or '[x]' if nothing else: 
+                    ; if only a 'y' or 'x', define the constant as nothing
+                    .if open + 2 = close
+                        .define _CONST 
+                        ; next has to be a + or -, or it is an error
+                    .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, +)
+                        .define _CONST + (.mid(open + 3, close - open - 3 ,{op}))
+                    .elseif .xmatch( {.mid(open + 2, 1 ,{op})}, -)
+                        .define _CONST - (.mid(open + 3, close - open - 3 ,{op}))
+                    .else
+                        .error "Expected: '+' or '-'"
+                    .endif
                 .else
-                    .error "Expected: '+' or '-'"
+                    ; No reg found yet. Check for '+x' anywhere in the brackets
+                    ___findToken {op}, x, regPos
+                    .if regPos && regPos < close
+                        reg .set REGX
+                    .else
+                        ___findToken {op}, y, regPos
+                        .if regPos && regPos < close
+                            reg .set REGY
+                        .endif
+                    .endif
+                    ; found a valid register? to the left must be a +
+                    .if reg
+                        .if !.xmatch( {.mid(regPos - 1, 1 ,{op})}, +) 
+                            .error "Expected: '+' before x or y."
+                        .endif
+                        ; lda foo[ 3 + x - 5 ]
+                        ;      0 1 2 3 4 5 6 7
+                        .define _CONST + (.mid(open + 1, regPos - open - 2, {op}) .mid(regPos + 1, close - regPos - 1, {op}))
+                    .else
+                        ; no registers, constant is whatever is in the '[]'
+                        .define _CONST + (.mid(open + 1, close - open - 1 ,{op}))
+                    .endif
                 .endif
             .else
-                ; No reg found yet. Check for '+x' anywhere in the brackets
-                ___findToken {op}, x, regPos
-                .if regPos && regPos < close
-                    reg .set REGX
-                .else
-                    ___findToken {op}, y, regPos
-                    .if regPos && regPos < close
-                        reg .set REGY
-                    .endif
-                .endif
-                ; found a valid register? to the left must be a +
-                .if reg
-                    .if !.xmatch( {.mid(regPos - 1, 1 ,{op})}, +) 
-                        .error "Expected: '+' before x or y."
-                    .endif
-                    ; lda foo[ 3 + x - 5 ]
-                    ;      0 1 2 3 4 5 6 7
-                    .define _CONST + (.mid(open + 1, regPos - open - 2, {op}) .mid(regPos + 1, close - regPos - 1, {op}))
-                .else
-                    ; no registers, constant is whatever is in the '[]'
-                    .define _CONST + (.mid(open + 1, close - open - 1 ,{op}))
-                .endif
+                .error "Expected: ']'"
             .endif
         .else
-            .error "Expected: ']'"
+            ; no '[]'
+            ; set value to make the expression below for .mid() become .tcount() only
+            open .set .tcount({op})
+            .define _CONST
         .endif
-    .else
-        ; no '[]'
-        ; set value to make the expression below for .mid() become .tcount() only
-        open .set .tcount({op})
-        .define _CONST
-    .endif
     
-    ; anything after the '[]' pair? this allows index to be anywhere in the expression, rather than only at the end
-    .if close && .tcount({op}) > close + 1
-        .define _AFTER () .mid(close + 1, .tcount({op}) - close - 1 , {op})
+        ; anything after the '[]' pair? this allows index to be anywhere in the expression, rather than only at the end
+        .if close && .tcount({op}) > close + 1
+            .define _AFTER () .mid(close + 1, .tcount({op}) - close - 1 , {op})
+        .else
+            .define _AFTER
+        .endif
+        .if reg = REGX
+            .define _OUT .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
+        .elseif reg = REGY
+            .define _OUT .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
+        .else                                                                 
+            .define _OUT .left(1,instr) .mid(0, open, {op}) _AFTER _CONST
+        .endif
+        .undefine _CONST
+        .undefine _AFTER
     .else
-        .define _AFTER
+        ; normal instruction syntax
+        .define _OUT instr op, index
     .endif
-    .if reg = REGX
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, x
-    .elseif reg = REGY
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST, y
-    .else                                                                 
-        .left(1,instr) .mid(0, open, {op}) _AFTER _CONST
+    _OUT ; output instruction as standard ca65 6502
+    .if _CUSTOM_::OUTPUT_CUSTOM_SYNTAX 
+        printTokenList {_OUT}
     .endif
-    .undefine _CONST
-    .undefine _AFTER
+    .undefine _OUT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -268,6 +284,9 @@
 .macro macro_jmp operand
     .undefine jmp
     jmp operand
+    .if _CUSTOM_::OUTPUT_CUSTOM_SYNTAX 
+        printTokenList {jmp operand}
+    .endif
     ; Use this code with ca65hl.h to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
     ; If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF macro that will suppress the macro's normal generation of a 
     ; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
