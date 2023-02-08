@@ -95,11 +95,16 @@
         .exitmacro
     .endif
     
-    .define THISTOKEN() .mid(PRINTIDENT::_COUNTER_,1,{exp})
+    .define THISTOKEN() .mid(PRINTIDENT::_COUNTER_, 1, {exp})
     .if .match({THISTOKEN}, an_identname)
-        buildTokenStr .concat( " ",.string(THISTOKEN), " ")
-    .elseif .match({THISTOKEN}, 12345)
-        buildTokenStr .string(THISTOKEN)
+        ; attempt to format things a bit:
+        .if .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, ::) || .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, {,})
+            buildTokenStr .string(THISTOKEN)
+        .else
+            buildTokenStr .concat(.string(THISTOKEN), " ")
+        .endif
+    .elseif .match({THISTOKEN}, 1)
+        buildTokenStr .sprintf("$%02X", THISTOKEN)
     .elseif .xmatch({THISTOKEN}, a)
         buildTokenStr "a "
     .elseif .xmatch({THISTOKEN}, x)
@@ -109,47 +114,43 @@
     .elseif .xmatch({THISTOKEN}, s)
         buildTokenStr "s "
     .elseif .xmatch({THISTOKEN}, :=)
-        buildTokenStr ":="
+        buildTokenStr ":= "
     .elseif .xmatch({THISTOKEN}, =)
-        buildTokenStr "="
+        buildTokenStr "= "
     .elseif .xmatch({THISTOKEN}, <>)
-        buildTokenStr "<>"
+        buildTokenStr "<> "
     .elseif .xmatch({THISTOKEN}, <)
         buildTokenStr "<"
     .elseif .xmatch({THISTOKEN}, >)
         buildTokenStr ">"
     .elseif .xmatch({THISTOKEN}, <=)
-        buildTokenStr "<="
+        buildTokenStr "<= "
     .elseif .xmatch({THISTOKEN}, >=)
-        buildTokenStr ">="
+        buildTokenStr ">= "
     .elseif .xmatch({THISTOKEN}, .and)
-        buildTokenStr " .and "
+        buildTokenStr "&& "
     .elseif .xmatch({THISTOKEN}, .or)
-        buildTokenStr " .or "
+        buildTokenStr "|| "
     .elseif .xmatch({THISTOKEN}, .xor)
-        buildTokenStr " .xor "
+        buildTokenStr ".xor "
     .elseif .xmatch({THISTOKEN}, .not)
-        buildTokenStr " .not "
+        buildTokenStr "! "
     .elseif .xmatch({THISTOKEN}, +)
-        buildTokenStr " + " 
+        buildTokenStr "+ " 
     .elseif .xmatch({THISTOKEN}, -)
-        buildTokenStr " - "
+        buildTokenStr "- "
     .elseif .xmatch({THISTOKEN}, *)
-        buildTokenStr " * "
+        buildTokenStr "* "
     .elseif .xmatch({THISTOKEN}, /)
-        buildTokenStr " / "
-    .elseif .xmatch({THISTOKEN}, !)
-        buildTokenStr " ! "
+        buildTokenStr "/ "
     .elseif .xmatch({THISTOKEN}, |)
-        buildTokenStr " | "
-    .elseif .xmatch({THISTOKEN}, ^)
-        buildTokenStr "^"
+        buildTokenStr "| "
     .elseif .xmatch({THISTOKEN}, &)
-        buildTokenStr " & "
+        buildTokenStr "& "
     .elseif .xmatch({THISTOKEN}, <<)
-        buildTokenStr " << "
+        buildTokenStr "<< "
     .elseif .xmatch({THISTOKEN}, >>)
-        buildTokenStr " >> "
+        buildTokenStr ">> "
     .elseif .xmatch({THISTOKEN}, ~)
         buildTokenStr "~"
     .elseif .xmatch({THISTOKEN}, ::)
@@ -163,14 +164,14 @@
     .elseif .xmatch({THISTOKEN}, :)
         buildTokenStr ":"
     .elseif .xmatch({THISTOKEN}, {(})
-        buildTokenStr "( "
+        buildTokenStr "("
     .elseif .xmatch({THISTOKEN}, {)})
-        buildTokenStr " )"
+        buildTokenStr ")"
     .elseif .xmatch({THISTOKEN}, [)
         buildTokenStr "["
     .elseif .xmatch({THISTOKEN}, ])
         buildTokenStr "]"
-    .elseif .xmatch({THISTOKEN}, Z:)
+    .elseif .xmatch({THISTOKEN}, z:)
         buildTokenStr "z:"
     .elseif .xmatch({THISTOKEN}, a:)
         buildTokenStr "a:"
