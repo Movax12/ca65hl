@@ -150,7 +150,7 @@ enclosed section if required. For example, if your inline macro or code
 uses characters in its parameters that would normally be recognized as
 part of a conditional expression, you can enclose the parameters in
 parentheses and it will be ignored. This is especially useful with some
-on the integrated macro support.
+of the integrated macro support.
 
 Example:
 
@@ -209,7 +209,7 @@ an entire parentheses set can be negated:
         ; my Flag code
     endif
 
-These two `if` statements generate equivalent code:
+These two `if` statements generate the same code:
 
     if ( C set || N set || V set)
         ; code
@@ -257,8 +257,8 @@ With `elseif`:
         ;execute here if second condition true
     endif
 
-For greatest compatibility, only pass the single letter flag, with an 
-optional 'set or 'clear' with `else` or `elseif`.
+For greatest compatibility, only pass the single letter representing the flag, 
+with an single negation (!) or ending with an optional 'set or 'clear' with `else` or `elseif`.
 
 ## Long branches:
 
@@ -286,7 +286,8 @@ The `if` macro can also accept an optional `long` or `short` parameter:
     if <condition>, long  ; use JMP instruction to branch, regardless of setLongBranch setting
     if <condition>, short ; use branch instructions to branch, regardless of setLongBranch setting
     
-Due to the one-pass nature of ca65, it is not possible to do this automatically.
+Due to the one-pass nature of ca65, it is not possible to do this automatically for forward branches, 
+but backward branches will automatically use the correct long or short branch.
 
 #### If Statement with `goto` or `break`
 
@@ -326,6 +327,8 @@ recognized identifier is found, so this also will work:
     if ( height >= #$F0 )
         ; too high code
     endif
+
+This implies using the `lda` instruction to access the value in `height`.
 
 Valid comparison operators: `=, <>, >, <, >=, <=`
 
@@ -405,13 +408,16 @@ constant in parentheses and the macro code will skip it and pass it to
 the assembler:
 
     mb a := #(FOO * 4 + 2)      ; just generate: lda #(FOO * 4 + 2)
+    
+As well, the equal symbol (`=`) can be used instead, but if used in a conditional
+statement, use `:=` to avoid confusion with the comparison macro. 
 
 ### Extended Syntax
 
 In the file `ca65hl.h` there is an check for the global identifier
-`_CA65HL_USE_CUSTOM_SYNTAX_` If it is not defined or defined as a non-zero 
+`__CA65HL_USE_CUSTOM_SYNTAX__` If it is not defined or defined as a non-zero 
 value, `customSyntax.h` will be included in the source. This file enables
-an optional syntax for 6502 assembly that allows offsets and indexed opcodes 
+an optional syntax for 6502 assembly that allows offsets and indexed instructions 
 to be written like arrays.
 
 For example:
@@ -713,5 +719,35 @@ applied that ca65 cannot determine on its own at assemble time
 ( due to the one-pass assembly design ). Important errors or warnings will 
 not be suppressed.
 
+## Troubleshooting
+
+Though ca65hl has been tested, there may be bugs! To see some info on what the macros are doing, 
+set `__DEBUG_CA65HL__` to a non-zero value. The macros will print some info to the console on what
+they are doing. This is very limited at this time, but may help isolate problems.
+
+As well, customSyntax and ca65hl macros support a simple method of printing the assembly code that 
+the macros generate to the console. Use the macro `ca65hl_Listing` to turn this feature on and off.
+
+Example:
+    
+    ca65hl_Listing on, "Loop"
+    for ( ldy #15, !negative, dey )
+       mb backgroundPalette[ y ] = (palPtr)[ y ]
+    next
+    ca65hl_Listing off, "End Loop"
+    
+    ; Console output:
+    ; Loop
+    ldy #$0F
+    FOR_STATEMENT_LABEL_0001:
+    lda (palPtr ), y 
+    sta backgroundPalette, y 
+    dey 
+    bpl FOR_STATEMENT_LABEL_0001 
+    ; End Loop
+    
+This could be used for troubleshooting, or to export code to use without ca65hl macros. When used 
+with customSyntax, all instructions will be printed. If customSyntax macros are not used, this 
+will only output labels that are generated. In either case, data and labels will not be printed.
 
 END
