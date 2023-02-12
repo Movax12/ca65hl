@@ -970,7 +970,7 @@
 .macro ___LOAD_imm_ca65HL value
 
     .if .const(value)
-        .if .not ( value = ___moveWord::previousImm )
+        .if !( value = ___moveWord::previousImm )
             LOAD # ( value )
             ___moveWord::previousImm .set value 
         .endif
@@ -999,9 +999,6 @@
     ; set to a value that couldn't fit into one byte to avoid matching the first byte
     ___moveWord::previousImm .set $0100
     
-    .if .const(source)
-    .out "C!"
-    .endif
     .if imm
         .repeat destsize, i
             ; nothing to do for source if sourcecount is -1
@@ -1032,8 +1029,6 @@
     
     .undefine LOAD
     .undefine STORE
-    ;.undefine checkForZeroValue
-    
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
