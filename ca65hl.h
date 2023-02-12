@@ -94,7 +94,7 @@
     LAST_ENDIF_COUNT                    .set 0  ; keep track of the count of last IF-ENDIF block
     DO_WHILE_STATEMENT_COUNT            .set 0  ; while loop counter 
     WHILE_DO_ENDWHILE_STATEMENT_COUNT   .set 0  ; while..do endwhile counter
-    FOR_STATEMENT_COUNTER               .set 0  ; for statement counter
+    FOR_STATEMENT_COUNT                 .set 0  ; for statement counter
     SWITCH_STATEMENT_COUNTER            .set 0  ; switch statement counter
     SWITCH_STATEMENT_DATA_SEG           .set 0  ; flag: if on, use data segment defined by setSwitchStatementDataSeg
     NEGATE_CONDITION                    .set 0  ; flag: if on, conditions are inverted
@@ -444,7 +444,7 @@
 ;
 ; Parameters:
 ;
-;   l - 'long' or 'short' expected
+;   none    
 ;
 ; If long or short branch forced, will be ignored for backward branches.
 ; Warn that this is the case. This will be removed in future versions.
@@ -954,7 +954,7 @@
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Macro for copying parameters.
+; Helper macros for .macro mw (Move Word)
 ; This will output the appropriate amount of load/store instructions
 ; Arguments: CPU register to use, source, destination, dest. size, source size, and immediate mode flag
 ; Source must be the same size or smaller then the dest.
@@ -999,36 +999,40 @@
     ; set to a value that couldn't fit into one byte to avoid matching the first byte
     ___moveWord::previousImm .set $0100
     
+    .if .const(source)
+    .out "C!"
+    .endif
     .if imm
         .repeat destsize, i
-                ; nothing to do for source if sourcecount is -1
-                .if sourcecount <> -1 
-                    .if sourcecount = 0
-                        LOAD #0
-                    .else
-                        ___LOAD_imm_ca65HL <( ( source ) >> (8 * i) )
-                    .endif
-                    sourcecount .set sourcecount - 1
+            ; nothing to do for source if sourcecount is -1
+            .if sourcecount <> -1 
+                .if sourcecount = 0 && source <> 0
+                    LOAD #0
+                .else
+                    ___LOAD_imm_ca65HL <( ( source ) >> (8 * i) )
                 .endif
-                STORE i+dest
+                sourcecount .set sourcecount - 1
+            .endif
+            STORE i+dest
         .endrepeat
     .else
         .repeat destsize, i
-                ; nothing to do for source if sourcecount is -1
-                .if sourcecount <> -1 
-                    .if sourcecount = 0
-                        LOAD #0
-                    .else   
-                        LOAD i + source
-                    .endif
-                    sourcecount .set sourcecount - 1
+            ; nothing to do for source if sourcecount is -1
+            .if sourcecount <> -1 
+                .if sourcecount = 0
+                    LOAD #0
+                .else   
+                    LOAD i + source
                 .endif
-                STORE i+dest
+                sourcecount .set sourcecount - 1
+            .endif
+            STORE i+dest
         .endrepeat
     .endif
     
     .undefine LOAD
     .undefine STORE
+    ;.undefine checkForZeroValue
     
 .endmacro
 
@@ -1039,9 +1043,10 @@
 ;    register - Optional - register to use 
 ;    exp - expression to process
 ;
-;   Simple support for moving 16 bits as address or immediate.
-;   Can accept one parameter. If no register passed, register to use will be searched for, 
-;   or register A will be used by default. (The macro will adjust arguments if exp is empty).
+;   Support for moving 16 bits as address or immediate.
+;   Can accept one parameter that specifies the CPU register to use for moving memory. 
+;   If no register passed, will use register A
+;   (The macro will adjust arguments if exp is empty).
 
 .macro mw register, exp
 
@@ -1087,7 +1092,7 @@
     
     .define _T_DEST_ .mid(0, pos, {_EXP})
     .define _T_SOURCE_ .mid(pos + 1, .tcount({_EXP}) - pos - 1, {_EXP})
-    ; for now, this will always be two for 16 bit move, keep as 'variable' to allow future changes
+    ; for now, this will always be two for 16 bit move:
     parameterDestSize .set 2
     
     ; --------------------------------------------------------------------------------------------
@@ -1106,12 +1111,11 @@
         .endif
     .else
         .define _DEST_ _T_DEST_
-        .define _DEST_STR_ ""
+        .define _DEST_STR_ .string(_DEST_)
     .endif
     
     ; --------------------------------------------------------------------------------------------
     ; find source
-
     .if .xmatch( {.left(1, {_T_SOURCE_} ) } , {&} ) 
             parameterSourceSize .set 2
             immMode .set 1
@@ -1124,8 +1128,10 @@
         .define _SOURCE_ .mid(1, .tcount( {_T_SOURCE_} ) - 1 , {_T_SOURCE_})
         ; check if there is a constant
         .if .const( _SOURCE_ ) 
-            .if ( _SOURCE_ & $FFFF0000 ) 
+            .if ( _SOURCE_ & $FF000000 ) 
                 parameterSourceSize .set 4
+            .elseif ( _SOURCE_ & $FF0000 )
+                parameterSourceSize .set 3
             .elseif ( _SOURCE_ & $FF00 )
                 parameterSourceSize .set 2
             .else
@@ -1134,20 +1140,16 @@
         .else ; not a constant, so just match destination size. 
             parameterSourceSize .set parameterDestSize
         .endif
-    
     ; Check if source is using a size cast:
     .elseif .xmatch( .left( 1, {_T_SOURCE_}), {(} ) ; size cast
         .if .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .byte )
             castbase .set 1
         .elseif .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .word ) || .xmatch( .mid(1, 1 , {_T_SOURCE_}) ,  .addr )
             castbase .set 2
-        .elseif .xmatch( .mid( 1, 1 , {_T_SOURCE_}) ,  .dword )
-            castbase .set 4
         .else
-            .error "Size expected for cast: .byte, .word, .addr or .dword"
+            .error "Size expected for cast: .byte, .word, .addr"
             .fatal "STOP"
         .endif    
-        
         .if .match( .mid( 2, 1 , {_T_SOURCE_}), 1) ; number
             castbase .set castbase * .mid(2, 1 , {_T_SOURCE_})
             .if .not .xmatch( .mid( 3, 1 , {_T_SOURCE_}), {)} )
@@ -1167,17 +1169,14 @@
     .else
         ; Start here: no leading tokens to skip due to not address operator, not immediate, not cast size:
         .define _SOURCE_  _T_SOURCE_
-        
         ; is source a register?
         ; if not check for other operators supported:
         ; < for lowbyte
         ; > for high bye
         ; otherwise check for an identifier and find its size if possible
         
-        ; default:
         ; size of ident may be difficult to determine, so default to this for ca65 to evaluate later and copy parameterDestSize number of bytes:
-        parameterSourceSize .set parameterDestSize
-            
+        parameterSourceSize .set parameterDestSize ; default!
         ; see if we can determine the size:
         
         ; Check if register:
@@ -1222,7 +1221,7 @@
     .endif
     
     ; if source is a CPU reg. and destination is not a register: (assume it is memory)
-    .if (.xmatch( _SOURCE_, a) || .xmatch( _SOURCE_, x) || .xmatch( _SOURCE_, y) ) && (.not destIsReg)
+    .if (.xmatch( _SOURCE_, a) || .xmatch( _SOURCE_, x) || .xmatch( _SOURCE_, y) ) && (!destIsReg)
         .if .xmatch( _SOURCE_, a) ; if the source is reg.a:
             sta _DEST_
         .elseif .xmatch( _SOURCE_, x) ; if the source is reg.x:
@@ -1234,7 +1233,7 @@
         .if parameterDestSize > 1
             .warning "MW: Register source size is 1 byte: High bytes not set."
         .endif
-    .elseif (.xmatch( _SOURCE_, ax) || .xmatch( _SOURCE_, ay) || .xmatch( _SOURCE_, xy) ) && (.not destIsReg)
+    .elseif (.xmatch( _SOURCE_, ax) || .xmatch( _SOURCE_, ay) || .xmatch( _SOURCE_, xy) ) && (!destIsReg)
         .if .xmatch( _SOURCE_, ax) ; if the source is ax:
             sta _DEST_
             stx _DEST_ + 1
@@ -1246,8 +1245,7 @@
             sty _DEST_ + 1
         .endif   
     .elseif (.not destIsReg ) && (.not sourceIsReg ) ; if destination and source is not a register, it is memory
-        ; check which register is open for moving memory
-        ; we don't have to mark it as used, because it is not holding a value that matters if not already marked
+        ; check which register is supposed to be used for moving memory
         .if requestReg = ___math::REGY
             ___moveMem_ca65hl y, _SOURCE_, _DEST_, parameterDestSize, parameterSourceSize, immMode
         .elseif requestReg = ___math::REGX
@@ -1256,7 +1254,7 @@
             ___moveMem_ca65hl a, _SOURCE_, _DEST_, parameterDestSize, parameterSourceSize, immMode
         .endif       
     .elseif .xmatch( _DEST_, ax) ; if the dest. is reg.ax:
-        .if .not sourceIsReg ; if source is not a register, assume it is memory
+        .if !sourceIsReg ; if source is not a register, assume it is memory
             .if immMode
                 lda # <_SOURCE_
                 ldx # >_SOURCE_
@@ -1266,7 +1264,7 @@
             .endif   
         .endif
     .elseif .xmatch( _DEST_, ay) ; if the dest. is reg.ay:
-        .if .not sourceIsReg ; if source is not a register, assume it is memory
+        .if !sourceIsReg ; if source is not a register, assume it is memory
             .if immMode
                 lda # <_SOURCE_
                 ldy # >_SOURCE_
@@ -1276,7 +1274,7 @@
             .endif   
         .endif
     .elseif .xmatch( _DEST_, xy) ; if the dest. is reg.xy:
-        .if .not sourceIsReg ; if source is not a register, assume it is memory
+        .if !sourceIsReg ; if source is not a register, assume it is memory
             .if immMode
                 ldx # <_SOURCE_
                 ldy # >_SOURCE_
@@ -1293,7 +1291,6 @@
     .undefine _DEST_
     .undefine _T_DEST_
     .undefine _T_SOURCE_
-    
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -1511,8 +1508,6 @@
   ;  .endif
     ; --------------------------------------------------------------------------------------------
     
-    
-    .local exitBranchEvaluation         ;  label: branch to this label on failed condition (acts like a pass/true condition with a code block defined by if..endif)
     .local doLongJump                   ;  label: for long jump: branch to this label on a passed/true condition when long jumps active
     .local firstBranchToLongJump        ;  label: for verifying a long jump is needed: address from the first branch that will use a long jump
     .local negateBracketSet             ;  flag: if a set of terms in brackets to be negated
@@ -1555,6 +1550,7 @@
     ; statementTokenCount     .set 0
     ; foundAND                .set 0
     ; foundOR                 .set 0
+    ; longJumpNotNeeded       .set 0  
     
     .if FLOW_CONTROL_VALUES::IF_STATEMENT_ACTIVE
         ___error "Cannot use 'if' statement from within conditional expression."
@@ -1584,7 +1580,11 @@
     .undefine _IF_OPT1_
     
     ; array for label locations: (uses global to reuse ident)
-    .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))    
+    .define tokenPositionForBranchLabel(c)  ::.ident(.sprintf("POS_FOR_BRANCH_%02X", c))
+    
+    ; define for exiting IF condition (branch to this label when a condition fails)
+    .define exitBranchEvaluation            .ident(.sprintf("IF_STATEMENT_%04X_EXIT_BRANCH_EVALUATION", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT ))
+    
     startTokenListEval {condition}    ; use token macros to make processing tokens easier
     ; --------------------------------------------------------------------------------------------
     ; verify brackets and find total tokens for the condition excluding goto/break
@@ -1883,10 +1883,12 @@
         .endif
     .endif
     
-    ; Local label for exiting branch code for this evaluation. Branch here when a condition fails, 
-    ; which also is the start of a code block for an IF..ENDIF since it branches to ENDIF on an 
-    ; inverted condition.
-    exitBranchEvaluation:   
+    ; Branch here when a condition fails, which also is the start of a code block 
+    ; for an IF..ENDIF since it branches to ENDIF on an inverted condition. 
+    ; Print the label to the console if requested.
+    .ifref exitBranchEvaluation
+        ___emitLabel .string(exitBranchEvaluation)
+    .endif
 
     .if gotoBreakLabel
         stackPush .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType), FLOW_CONTROL_VALUES::___breakStatementCounter
@@ -1901,6 +1903,7 @@
     endTokenListEval ; clear token evaluation    
     .undefine destinationLabel
     .undefine tokenPositionForBranchLabel
+    .undefine exitBranchEvaluation
 
 .endmacro
 
@@ -2474,14 +2477,14 @@
             ___error "Expected: 'strict': Test condition before first loop is executed."
         .endif
         stackPush "FOR_STATEMENT_STRICT", 1
-        jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER))
+        jmp .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT))
     .else
         stackPush "FOR_STATEMENT_STRICT", 0
     .endif
-    ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER)
+    ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_%04X", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT)
     
-    stackPush "FOR_STATEMENT_STACK", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER
-    FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNTER + 1
+    stackPush "FOR_STATEMENT_STACK", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT
+    FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT + 1
     
     pushTokenList "FOR_STATEMENT_CONDITION", {COND}
     pushTokenList "FOR_STATEMENT_INCREMENT", {INCR}
@@ -2489,7 +2492,6 @@
     .undefine INCR
     .undefine INIT
     .undefine COND
-   
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2500,12 +2502,12 @@
 ;   End of a for loop. Outputs increment and condition code for corresponding FOR macro.
 
 .macro next branchtype
-    .local FOR_STATEMENT_COUNTER
+    .local FOR_STATEMENT_COUNT
     .local FOR_STATEMENT_STRICT_STATUS
     
-    stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNTER
+    stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNT
     stackPop "FOR_STATEMENT_STRICT", FOR_STATEMENT_STRICT_STATUS
-    .if FOR_STATEMENT_COUNTER < 0
+    .if FOR_STATEMENT_COUNT < 0
         ___error "'next' without 'for'."
     .endif
     ; if FOR_STATEMENT_STACK is valid, then popTokenList should be too:
@@ -2513,12 +2515,11 @@
     ___evaluateStatementList {poppedTokenList}
     .if FOR_STATEMENT_STRICT_STATUS
         ; jmp here on strict:
-        ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)
+        ___emitLabel .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNT)
     .endif
-    ; .ident( .sprintf( "FOR_STATEMENT_LABEL_JMP_TO_CONDITION_%04X", FOR_STATEMENT_COUNTER)):
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNTER)) }, branchtype
+    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_LABEL_%04X", FOR_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     ___popLoopType
     ___generateBreakLabel
@@ -2533,13 +2534,11 @@
 ; Set the segment for the table data for the 'switch' statement.
 
 .macro setSwitchStatementDataSeg string
-
     .if FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG
         .undefine SWITCH_STATEMENT_DATA_SEG_STRING
     .endif
     .define SWITCH_STATEMENT_DATA_SEG_STRING string
     FLOW_CONTROL_VALUES::SWITCH_STATEMENT_DATA_SEG .set 1
-
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2570,7 +2569,6 @@
         gotoMode = 0
     .endif
     
-    .define DECREMENT_COMMAND dex   ; default
     .if !gotoMode
         .if .xmatch( reg, a )
             ;
@@ -2581,30 +2579,28 @@
         .else 
             lda reg
         .endif
-        .define SWITCH_INFO_REG "X"
+        .define SWITCH_INFO_REG "Register X loaded/changed to index data for switch."
         .define INDEX_REG_FOR_TABLE x
     .else ; no compare, just branch on lookup value in reg. x or y
         .if .xmatch( reg, x )
             .define INDEX_REG_FOR_TABLE x
-            .define SWITCH_INFO_REG "none"
+            .define SWITCH_INFO_REG ""
         .elseif .xmatch( reg, a )
             tax
             .define INDEX_REG_FOR_TABLE x
-            .define SWITCH_INFO_REG "X"
+            .define SWITCH_INFO_REG "Register X loaded/changed to index data for switch."
         .elseif .xmatch( reg, y )
             .define INDEX_REG_FOR_TABLE y
-            .define SWITCH_INFO_REG "none"
-            ;.undefine DECREMENT_COMMAND
-            ;.define DECREMENT_COMMAND dey
+            .define SWITCH_INFO_REG ""
         .else 
             ldx reg
             .define INDEX_REG_FOR_TABLE x
-            .define SWITCH_INFO_REG "X"
+            .define SWITCH_INFO_REG "Register X loaded/changed to index data for switch."
         .endif
     .endif
     
     .if ::__CA65HL_WARNING_LEVEL__ > 1
-        .warning .sprintf( "INFO: Switch: Register A value changed for switch. Register %s loaded/changed to index data for switch.", SWITCH_INFO_REG)
+        .warning .sprintf( "INFO: Switch: Register A value changed for switch. %s", SWITCH_INFO_REG)
     .endif
     
     .if !gotoMode
@@ -2613,13 +2609,11 @@
         loop:
             cmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_CONSTANTS", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
             beq found
-            ;DECREMENT_COMMAND  
             dex
         bpl loop
         jmp .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER))
         found:
     .endif
-    
     lda .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_HIBYTES", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
     pha
     lda .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_TABLE_LOBYTES", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER)), INDEX_REG_FOR_TABLE
@@ -2631,7 +2625,6 @@
     FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER .set FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNTER + 1
     .undefine INDEX_REG_FOR_TABLE
     .undefine SWITCH_INFO_REG
-    .undefine DECREMENT_COMMAND
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
