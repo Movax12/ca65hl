@@ -98,7 +98,8 @@
     .define THISTOKEN() .mid(PRINTIDENT::_COUNTER_, 1, {exp})
     .if .match({THISTOKEN}, an_identname)
         ; attempt to format things a bit:
-        .if .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, ::) || .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, {,})
+        .if .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, ::) || .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, {,}) || \ 
+            .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, :) || .xmatch({.mid(PRINTIDENT::_COUNTER_ + 1, 1, {exp})}, {)})
             buildTokenStr .string(THISTOKEN)
         .else
             buildTokenStr .concat(.string(THISTOKEN), " ")
