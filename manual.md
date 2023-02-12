@@ -321,7 +321,7 @@ Designed to be used inline with a conditional expression. For example:
 
 Here, the a macro is called (expanded). It generates a small amount of
 code for the comparison of the accumulator to the constant. (In this
-case `cmp \#$F0`). It then sets the flag condition to C set. If a
+case `cmp #$F0`). It then sets the flag condition to C set. If a
 recognized identifier is found, so this also will work:
 
     if ( height >= #$F0 )
@@ -346,6 +346,19 @@ If you wish to use another register:
         ; too high code
     endif
 
+If preferred, you can stay closer to assembly language:
+    
+    ldy height
+    cpy #$F0
+    if ( C set )
+        ; too high code
+    endif
+    
+    ; or, in one line:
+    if ( ldy height : cpy #$F0 == C set )
+        ; too high code
+    endif
+    
 ### Macro `mb`
 
 The `mb` macro is designed to make moving byte values and performing
@@ -362,7 +375,7 @@ whatever is on the left.
 
     mb foo := bar
 
-So, foo and bar can both be either a 6502 register or memory address
+In this case, foo and bar can both be either a 6502 register or memory address
 (variable). If for example:
 
     mb x := a
@@ -409,8 +422,28 @@ the assembler:
 
     mb a := #(FOO * 4 + 2)      ; just generate: lda #(FOO * 4 + 2)
     
-As well, the equal symbol (`=`) can be used instead, but if used in a conditional
-statement, use `:=` to avoid confusion with the comparison macro. 
+As well, the equal symbol `=` can be used for assignment, but if used in a 
+conditional statement, use `:=` to avoid confusion with equality comparison macro. 
+
+### Macro `mw`
+
+The 'mw' macro (Move Word) can move 16 bits. It supports moving from memory to memory, 
+immediate to memory as well as 'ax', 'ay', and 'xy' as 16 bit register pairs that can be
+used as source or destinations for 16 bits values. It does not support other operations.
+
+If an 8 bit value is loaded, the high byte of the destination will be set to zero. 
+Sign extending may be supported in the future.
+If a 16 bit immediate value with the same high and low byte is loaded, the load operation
+will only be executed once.
+
+Examples:
+
+    mw foo = #$1234
+    
+    ; use & as an alternative for the # immediate operator to indicate an address:
+    mw ax = &myString
+    
+    mw myPtr = ay
 
 ### Extended Syntax
 
@@ -418,7 +451,9 @@ In the file `ca65hl.h` there is an check for the global identifier
 `__CA65HL_USE_CUSTOM_SYNTAX__` If it is not defined or defined as a non-zero 
 value, `customSyntax.h` will be included in the source. This file enables
 an optional syntax for 6502 assembly that allows offsets and indexed instructions 
-to be written like arrays.
+to be written like arrays. This makes it easier to allow assembly instructions in 
+a conditional statement, as commas are not needed and curly braces can be avoided.
+Normal assembly syntax can still be used.
 
 For example:
 
@@ -721,12 +756,13 @@ not be suppressed.
 
 ## Troubleshooting
 
-Though ca65hl has been tested, there may be bugs! To see some info on what the macros are doing, 
+Although ca65hl has been tested, there may be bugs! To see some info on what the macros are doing, 
 set `__DEBUG_CA65HL__` to a non-zero value. The macros will print some info to the console on what
 they are doing. This is very limited at this time, but may help isolate problems.
 
-As well, customSyntax and ca65hl macros support a simple method of printing the assembly code that 
-the macros generate to the console. Use the macro `ca65hl_Listing` to turn this feature on and off.
+As well, and perhaps more useful, customSyntax and ca65hl macros support printing the 
+assembly code that the macros generate to the console. Use the macro `ca65hl_Listing` to 
+turn this feature on and off.
 
 Example:
     
@@ -737,17 +773,18 @@ Example:
     ca65hl_Listing off, "End Loop"
     
     ; Console output:
+    
     ; Loop
     ldy #$0F
     FOR_STATEMENT_LABEL_0001:
-    lda (palPtr ), y 
+    lda (palPtr), y 
     sta backgroundPalette, y 
     dey 
     bpl FOR_STATEMENT_LABEL_0001 
     ; End Loop
     
 This could be used for troubleshooting, or to export code to use without ca65hl macros. When used 
-with customSyntax, all instructions will be printed. If customSyntax macros are not used, this 
-will only output labels that are generated. In either case, data and labels will not be printed.
+with customSyntax, all instructions will be printed. If customSyntax macros are not used, ca65hl 
+will only output labels that are generated. In either case, user defined data and labels will not be printed.
 
 END
