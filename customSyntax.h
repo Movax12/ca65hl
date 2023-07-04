@@ -24,9 +24,9 @@
 ;
 ; .feature ubiquitous_idents
 ;
-; This feature allows instructions to be used as macro names. The macros then temporarily undefine themselves to
-; allow ca65 to process the instruction normally. Be careful to not declare your own macros with instruction
-; names accidentally. This shouldn't be possible unless these macros are inadvertently undefined. 
+; This feature allows instructions to be used as macro names. The macros will toggle .feature ubiquitous_idents
+; to allow ca65 to process the instruction normally. Be careful to not declare your own macros with instruction
+; names accidentally. ( This shouldn't be possible unless these macros are inadvertently undefined. )
 ;
 ; --------------------------------------------------------------------------------------------
 ; Two features offered with these macros:
@@ -57,22 +57,29 @@
 ; must be first in the square brackets, or the index register must be preceded by a plus (+). The macro then converts 
 ; it to standard syntax and passes it to ca65 to assemble the instruction as normal.
 
-.ifndef ::_CUSTOM_SYNTAX_
-::_CUSTOM_SYNTAX_ = 1
+.ifndef ::_CUSTOM_SYNTAX_H
+::_CUSTOM_SYNTAX_H = 1
 
-.feature ubiquitous_idents ; allow overloading mnemonics
+.feature ubiquitous_idents +    ; allow overloading mnemonics
 
-.scope _CUSTOM_
+.scope CUSTOM_SYNTAX
     JMP_INSTRUCTION_COUNTER     .set 0  ; count
-    EVALINSTRLISTCOUNT          .set 0  
     OUTPUT_CUSTOM_SYNTAX        .set 0
+    RTS_FOUND                   .set 0
 .endscope
+
+; RTS tracking is for future use
+.macro customSyntaxCountRTS
+    CUSTOM_SYNTAX::RTS_FOUND .set 0
+.endmacro
+
+.define customSyntaxFoundRTS () (CUSTOM_SYNTAX::RTS_FOUND)
 
 .macro customSyntax_Output opt1
     .if .xmatch( opt1, on )
-        _CUSTOM_::OUTPUT_CUSTOM_SYNTAX .set 1
+        CUSTOM_SYNTAX::OUTPUT_CUSTOM_SYNTAX .set 1
     .elseif .xmatch( opt1, off )
-        _CUSTOM_::OUTPUT_CUSTOM_SYNTAX .set 0
+        CUSTOM_SYNTAX::OUTPUT_CUSTOM_SYNTAX .set 0
     .else
         .error "Invalid option. Should be: 'on' or 'off'."
     .endif
@@ -105,7 +112,7 @@
 .endif
 
 ; --------------------------------------------------------------------------------------------
-; Function: ___arraySyntax instr, op
+; Function: ___arraySyntax instr, op, index
 ;
 ; Parameters:
 ;
@@ -222,8 +229,13 @@
         ; normal instruction syntax
         .define _OUT instr op, index
     .endif
-    _OUT ; output instruction as standard ca65 6502
-    .if _CUSTOM_::OUTPUT_CUSTOM_SYNTAX 
+    ; --------------------------------------------------------------------------------------------
+    ; Output instruction:
+    .feature ubiquitous_idents -    ; allow normal instruction table look ups
+    _OUT                            ; output instruction as standard ca65 6502 syntax
+    .feature ubiquitous_idents +    ; allow overloading mnemonics again
+    ; --------------------------------------------------------------------------------------------
+    .if CUSTOM_SYNTAX::OUTPUT_CUSTOM_SYNTAX 
         printTokenList {_OUT}
     .endif
     .undefine _OUT
@@ -239,16 +251,10 @@
 ;
 ; This macro is called by the overloaded instruction macros and allows for one or more instructions
 ; per line, separated by a colon ':'. A macro cannot be first on the line when using a multiple instructions.
-; It will send what it found to ___arraySyntax, to support extended syntax as described in this file.
+; It will send instructions to ___arraySyntax to support extended syntax as described in this file.
 
 .macro ___EvalInstrList statement, index
-    ; for a multiple instruction line: if first call to this macro, save who called it with CALLING_MACRO
-    ; Example: if called by macro_ldx
-    ; CALLING_MACRO will be defined as: macro_ldx ldx
-    .if !_CUSTOM_::EVALINSTRLISTCOUNT
-        .define CALLING_MACRO .ident(.concat("macro_", .string(.left(1,{statement})))) .left(1,{statement})
-    .endif
-    _CUSTOM_::EVALINSTRLISTCOUNT .set _CUSTOM_::EVALINSTRLISTCOUNT + 1
+
     ; split macro calls at colons:
     .local colonPos
     colonPos .set 0
@@ -258,383 +264,214 @@
             .error "Commas not supported for multiple instructions on one line."
             .fatal ""
         .endif
+        ; split at colon, and exit:
         ___EvalInstrList .mid(0, colonPos, {statement})
         ___EvalInstrList .mid( colonPos + 1 , .tcount({statement}) - colonPos - 1, {statement} )
     .else
-        ; no colon, output macros or instructions
-        .if .xmatch (.left(1,{statement}), .left(1, CALLING_MACRO) )    ; is this the calling macro? don't call the macro, call the instruction
-            ___arraySyntax .right(1, CALLING_MACRO), { .mid (1, .tcount({statement}) - 1, {statement} ) }, index
-        .elseif .definedmacro ( .left(1,{statement})) 
-            statement
-        .elseif .ismnemonic(.left (1,{statement})) || .xmatch( .left (1,{statement}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
+        ; no colon, output macros or instructions:
+
+        ; turn of instructions as macros temporarily to allow .ismnemonic to match instructions:
+        .local isInstruction
+        .feature ubiquitous_idents -
+        isInstruction = .ismnemonic(.left (1,{statement})) || .xmatch( .left (1,{statement}), adc) ; ca65 bug? .ismnemonic doesn't match 'adc'
+        .feature ubiquitous_idents +
+
+        ; if found an instruction, send it to ___arraySyntax to process any extended syntax, otherwise, let ca65 deal with it
+        .if isInstruction
+            
+            ; For instruction jmp: Save addresses of jmp instructions. This is to allow an .assert that checks ELSE or ELSEIF 
+            ; was not proceeded by a jmp instruction. If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF 
+            ; macro that will suppress the macro's normal generation of a jmp instruction to skip to the ENDIF. If 'jmp' 
+            ; option was used, it will verify that the usage is correct.
+            .if .xmatch(.left (1,{statement}), jmp )
+                .ifdef ::CA65HL_H
+                    ::.ident( .sprintf( "LAST_JMP_INSTRUCTION_END_ADDRESS_%04X", CUSTOM_SYNTAX::JMP_INSTRUCTION_COUNTER)) = * + 3
+                    CUSTOM_SYNTAX::JMP_INSTRUCTION_COUNTER .set CUSTOM_SYNTAX::JMP_INSTRUCTION_COUNTER + 1
+                .endif
+            .endif
+
+            ; tracking rts for future use
+            .if .xmatch(.left (1,{statement}), rts )
+                CUSTOM_SYNTAX::RTS_FOUND .set 1
+            .endif
+            
             ___arraySyntax .left (1,{statement}), { .mid (1, .tcount({statement}) - 1, {statement} ) }, index
         .else
-            .error "Unknown instruction or macro."
+            statement
         .endif
     .endif
-    _CUSTOM_::EVALINSTRLISTCOUNT .set _CUSTOM_::EVALINSTRLISTCOUNT - 1
-    .if !_CUSTOM_::EVALINSTRLISTCOUNT
-        .undefine CALLING_MACRO
-    .endif
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; special case for JMP:
+; Overload mnemonics to allow custom syntax for all instructions
 
-.macro macro_jmp operand
-    .undefine jmp
-    jmp operand
-    .if _CUSTOM_::OUTPUT_CUSTOM_SYNTAX 
-        printTokenList {jmp operand}
-    .endif
-    ; Use this code with ca65hl.h to track jump commands. This is to .assert that an ELSE or ELSEIF was not proceeded by a jmp instruction.
-    ; If it was, ca65hl will suggest to use 'jmp' option with the ELSE/ELSEIF macro that will suppress the macro's normal generation of a 
-    ; jmp instruction to skip to the ENDIF. If 'jmp' option was used, it will verify that the usage is correct.
-    .ifdef ::_CA65HL_H_
-        ::.ident( .sprintf( "JMP_INSTRUCTION_END_%04X", _CUSTOM_::JMP_INSTRUCTION_COUNTER)):
-        _CUSTOM_::JMP_INSTRUCTION_COUNTER .set _CUSTOM_::JMP_INSTRUCTION_COUNTER + 1
-    .endif
-    .define jmp macro_jmp
-.endmacro
-
-; --------------------------------------------------------------------------------------------
-; Allow custom syntax for all instructions
-
-.macro macro_lda operand, index
-    .undefine lda
+.macro lda operand, index
     ___EvalInstrList lda operand, index
-    .define lda macro_lda
 .endmacro
-.macro macro_sta operand, index
-    .undefine sta
+.macro sta operand, index
     ___EvalInstrList sta operand, index
-    .define sta macro_sta
 .endmacro
-.macro macro_ldx operand, index
-    .undefine ldx
+.macro ldx operand, index
     ___EvalInstrList ldx operand, index
-    .define ldx macro_ldx
 .endmacro
-.macro macro_stx operand, index
-    .undefine stx
+.macro stx operand, index
     ___EvalInstrList stx operand, index
-    .define stx macro_stx
 .endmacro
-.macro macro_ldy operand, index
-    .undefine ldy
+.macro ldy operand, index
     ___EvalInstrList ldy operand, index
-    .define ldy macro_ldy
 .endmacro
-.macro macro_sty operand, index
-    .undefine sty
+.macro sty operand, index
     ___EvalInstrList sty operand, index
-    .define sty macro_sty
 .endmacro
-.macro macro_adc operand, index
-    .undefine adc
+.macro adc operand, index
     ___EvalInstrList adc operand, index
-    .define adc macro_adc
 .endmacro
-.macro macro_and operand, index
-    .undefine and
+.macro and operand, index
     ___EvalInstrList and operand, index
-    .define and macro_and
 .endmacro
-.macro macro_asl operand, index
-    .undefine asl
+.macro asl operand, index
     ___EvalInstrList asl operand, index
-    .define asl macro_asl
 .endmacro
-.macro macro_cmp operand, index
-    .undefine cmp
+.macro cmp operand, index
     ___EvalInstrList cmp operand, index
-    .define cmp macro_cmp
 .endmacro
-.macro macro_dec operand, index
-    .undefine dec
+.macro dec operand, index
     ___EvalInstrList dec operand, index
-    .define dec macro_dec
 .endmacro
-.macro macro_eor operand, index
-    .undefine eor
+.macro eor operand, index
     ___EvalInstrList eor operand, index
-    .define eor macro_eor
 .endmacro
-.macro macro_inc operand, index
-    .undefine inc
+.macro inc operand, index
     ___EvalInstrList inc operand, index
-    .define inc macro_inc
 .endmacro
-.macro macro_lsr operand, index
-    .undefine lsr
+.macro lsr operand, index
     ___EvalInstrList lsr operand, index
-    .define lsr macro_lsr
 .endmacro
-.macro macro_ora operand, index
-    .undefine ora
+.macro ora operand, index
     ___EvalInstrList ora operand, index
-    .define ora macro_ora
 .endmacro
-.macro macro_rol operand, index
-    .undefine rol
+.macro rol operand, index
     ___EvalInstrList rol operand, index
-    .define rol macro_rol
 .endmacro
-.macro macro_ror operand, index
-    .undefine ror
+.macro ror operand, index
     ___EvalInstrList ror operand, index
-    .define ror macro_ror
 .endmacro
-.macro macro_sbc operand, index
-    .undefine sbc
+.macro sbc operand, index
     ___EvalInstrList sbc operand, index
-    .define sbc macro_sbc
 .endmacro
-.macro macro_bit operand, index
-    .undefine bit
+.macro bit operand, index
     ___EvalInstrList bit operand, index
-    .define bit macro_bit
 .endmacro
-.macro macro_cpx operand, index
-    .undefine cpx
+.macro cpx operand, index
     ___EvalInstrList cpx operand, index
-    .define cpx macro_cpx
 .endmacro
-.macro macro_cpy operand, index
-    .undefine cpy
+.macro cpy operand, index
     ___EvalInstrList cpy operand, index
-    .define cpy macro_cpy
 .endmacro
-.macro macro_inx operand, index
-    .undefine inx
+.macro inx operand, index
     ___EvalInstrList inx operand, index
-    .define inx macro_inx
 .endmacro
-.macro macro_iny operand, index
-    .undefine iny
+.macro iny operand, index
     ___EvalInstrList iny operand, index
-    .define iny macro_iny
 .endmacro
-.macro macro_bcc operand, index
-    .undefine bcc
+.macro bcc operand, index
     ___EvalInstrList bcc operand, index
-    .define bcc macro_bcc
 .endmacro
-.macro macro_bcs operand, index
-    .undefine bcs
+.macro bcs operand, index
     ___EvalInstrList bcs operand, index
-    .define bcs macro_bcs
 .endmacro
-.macro macro_beq operand, index
-    .undefine beq
+.macro beq operand, index
     ___EvalInstrList beq operand, index
-    .define beq macro_beq
 .endmacro
-.macro macro_bne operand, index
-    .undefine bne
+.macro bne operand, index
     ___EvalInstrList bne operand, index
-    .define bne macro_bne
 .endmacro
-.macro macro_bpl operand, index
-    .undefine bpl
+.macro bpl operand, index
     ___EvalInstrList bpl operand, index
-    .define bpl macro_bpl
 .endmacro
-.macro macro_bmi operand, index
-    .undefine bmi
+.macro bmi operand, index
     ___EvalInstrList bmi operand, index
-    .define bmi macro_bmi
 .endmacro
-.macro macro_brk operand, index
-    .undefine brk
+.macro brk operand, index
     ___EvalInstrList brk operand, index
-    .define brk macro_brk
 .endmacro
-.macro macro_bvc operand, index
-    .undefine bvc
+.macro bvc operand, index
     ___EvalInstrList bvc operand, index
-    .define bvc macro_bvc
 .endmacro
-.macro macro_bvs operand, index
-    .undefine bvs
+.macro bvs operand, index
     ___EvalInstrList bvs operand, index
-    .define bvs macro_bvs
 .endmacro
-.macro macro_clc operand, index
-    .undefine clc
+.macro clc operand, index
     ___EvalInstrList clc operand, index
-    .define clc macro_clc
 .endmacro
-.macro macro_cld operand, index
-    .undefine cld
+.macro cld operand, index
     ___EvalInstrList cld operand, index
-    .define cld macro_cld
 .endmacro
-.macro macro_cli operand, index
-    .undefine cli
+.macro cli operand, index
     ___EvalInstrList cli operand, index
-    .define cli macro_cli
 .endmacro
-.macro macro_clv operand, index
-    .undefine clv
+.macro clv operand, index
     ___EvalInstrList clv operand, index
-    .define clv macro_clv
 .endmacro
-.macro macro_dex operand, index
-    .undefine dex
+.macro dex operand, index
     ___EvalInstrList dex operand, index
-    .define dex macro_dex
 .endmacro
-.macro macro_dey operand, index
-    .undefine dey
+.macro dey operand, index
     ___EvalInstrList dey operand, index
-    .define dey macro_dey
 .endmacro
-.macro macro_jsr operand, index
-    .undefine jsr
+.macro jmp operand, index
+    ___EvalInstrList jmp operand, index
+.endmacro
+.macro jsr operand, index
     ___EvalInstrList jsr operand, index
-    .define jsr macro_jsr
 .endmacro
-.macro macro_nop operand, index
-    .undefine nop
+.macro nop operand, index
     ___EvalInstrList nop operand, index
-    .define nop macro_nop
 .endmacro
-.macro macro_pha operand, index
-    .undefine pha
+.macro pha operand, index
     ___EvalInstrList pha operand, index
-    .define pha macro_pha
 .endmacro
-.macro macro_php operand, index
-    .undefine php
+.macro php operand, index
     ___EvalInstrList php operand, index
-    .define php macro_php
 .endmacro
-.macro macro_pla operand, index
-    .undefine pla
+.macro pla operand, index
     ___EvalInstrList pla operand, index
-    .define pla macro_pla
 .endmacro
-.macro macro_plp operand, index
-    .undefine plp
+.macro plp operand, index
     ___EvalInstrList plp operand, index
-    .define plp macro_plp
 .endmacro
-.macro macro_rti operand, index
-    .undefine rti
+.macro rti operand, index
     ___EvalInstrList rti operand, index
-    .define rti macro_rti
 .endmacro
-.macro macro_rts operand, index
-    .undefine rts
+.macro rts operand, index
     ___EvalInstrList rts operand, index
-    .define rts macro_rts
 .endmacro
-.macro macro_sec operand, index
-    .undefine sec
+.macro sec operand, index
     ___EvalInstrList sec operand, index
-    .define sec macro_sec
 .endmacro
-.macro macro_sed operand, index
-    .undefine sed
+.macro sed operand, index
     ___EvalInstrList sed operand, index
-    .define sed macro_sed
 .endmacro
-.macro macro_sei operand, index
-    .undefine sei
+.macro sei operand, index
     ___EvalInstrList sei operand, index
-    .define sei macro_sei
 .endmacro
-.macro macro_tax operand, index
-    .undefine tax
+.macro tax operand, index
     ___EvalInstrList tax operand, index
-    .define tax macro_tax
 .endmacro
-.macro macro_tay operand, index
-    .undefine tay
+.macro tay operand, index
     ___EvalInstrList tay operand, index
-    .define tay macro_tay
 .endmacro
-.macro macro_tsx operand, index
-    .undefine tsx
+.macro tsx operand, index
     ___EvalInstrList tsx operand, index
-    .define tsx macro_tsx
 .endmacro
-.macro macro_txa operand, index
-    .undefine txa
+.macro txa operand, index
     ___EvalInstrList txa operand, index
-    .define txa macro_txa
 .endmacro
-.macro macro_txs operand, index
-    .undefine txs
+.macro txs operand, index
     ___EvalInstrList txs operand, index
-    .define txs macro_txs
 .endmacro
-.macro macro_tya operand, index
-    .undefine tya
+.macro tya operand, index
     ___EvalInstrList tya operand, index
-    .define tya macro_tya
 .endmacro
 
-; --------------------------------------------------------------------------------------------
-; OVERLOAD
-; --------------------------------------------------------------------------------------------
-
-.define jmp macro_jmp
-.define lda macro_lda
-.define sta macro_sta
-.define ldx macro_ldx
-.define stx macro_stx
-.define ldy macro_ldy
-.define sty macro_sty
-.define adc macro_adc
-.define and macro_and
-.define asl macro_asl
-.define cmp macro_cmp
-.define dec macro_dec
-.define eor macro_eor
-.define inc macro_inc
-.define lsr macro_lsr
-.define ora macro_ora
-.define rol macro_rol
-.define ror macro_ror
-.define sbc macro_sbc
-.define bit macro_bit
-.define cpx macro_cpx
-.define cpy macro_cpy
-.define inx macro_inx
-.define iny macro_iny
-.define bcc macro_bcc
-.define bcs macro_bcs
-.define beq macro_beq
-.define bne macro_bne
-.define bpl macro_bpl
-.define bmi macro_bmi
-.define brk macro_brk
-.define bvc macro_bvc
-.define bvs macro_bvs
-.define clc macro_clc
-.define cld macro_cld
-.define cli macro_cli
-.define clv macro_clv
-.define dex macro_dex
-.define dey macro_dey
-.define jsr macro_jsr
-.define nop macro_nop
-.define pha macro_pha
-.define php macro_php
-.define pla macro_pla
-.define plp macro_plp
-.define rti macro_rti
-.define rts macro_rts
-.define sec macro_sec
-.define sed macro_sed
-.define sei macro_sei
-.define tax macro_tax
-.define tay macro_tay
-.define tsx macro_tsx
-.define txa macro_txa
-.define txs macro_txs
-.define tya macro_tya
-
-.endif
+.endif ; .ifndef ::_CUSTOM_SYNTAX_H
