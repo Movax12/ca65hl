@@ -120,25 +120,37 @@ _STACKS_ = 1
 .endmacro
 
 ; ca65 copies the token list on macro call, so use this macro to get a copy and be able to undefine the stack element
-.macro tokenListPopHelper stackname, tokenlist
+.macro tokenListPopHelper tokenlist
     .define poppedTokenList() tokenlist
-    .undefine .ident( .sprintf("%s_%04X_",stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname)) ))
 .endmacro
 
 .macro popTokenList stackname
     .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
-    .ifndef thisStackPointer ; stack not defined
-        .error "Stack underflow."
-    .elseif  thisStackPointer - 1 < 0  ; or negative
-        .error "Stack underflow."
+    .if stacksValues::poppedTokenListActive
+        .undefine poppedTokenList
+    .endif
+    .if (!.defined(thisStackPointer)) ||  (thisStackPointer - 1 < 0) ; stack not defined OR empty stack
+        tokenListPopHelper null
     .else
         thisStackPointer .set thisStackPointer - 1
-        .if stacksValues::poppedTokenListActive
-            .undefine poppedTokenList
-        .endif
-        tokenListPopHelper stackname, { .ident( .sprintf("%s_%04X_", stackname, thisStackPointer) ) }
-        stacksValues::poppedTokenListActive .set 1
+        tokenListPopHelper { .ident( .sprintf("%s_%04X_", stackname, thisStackPointer) ) }
+        .undefine .ident( .sprintf("%s_%04X_", stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname)) ))
     .endif
+    stacksValues::poppedTokenListActive .set 1
+    .undefine thisStackPointer
+.endmacro
+
+.macro peekTokenList stackname
+    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
+    .if stacksValues::poppedTokenListActive
+        .undefine poppedTokenList
+    .endif
+    .if (!.defined(thisStackPointer)) ||  (thisStackPointer - 1 < 0) ; stack not defined OR empty stack
+        tokenListPopHelper null
+    .else
+        tokenListPopHelper { .ident( .sprintf("%s_%04X_", stackname, thisStackPointer - 1) ) }
+    .endif
+    stacksValues::poppedTokenListActive .set 1
     .undefine thisStackPointer
 .endmacro
 

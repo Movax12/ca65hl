@@ -33,8 +33,8 @@
 ; > mb  (Move Byte)
 ; > mw  (Move Word)
 ; > if
-; > else
 ; > elseif
+; > else
 ; > endif
 ; > do
 ; > while
@@ -44,8 +44,28 @@
 ; > while <> do
 ; > endwhile
 ; > break
+; > continue
 ; > for..next
 ; > switch..case..endswitch
+
+; --------------------------------------------------------------------------------------------
+; Note: types for ___loopType and corresponding labels
+; 
+; ___loopType               Start of Structure
+;
+; "FOR"                 -> "FOR_%04X_START"  
+; "DO_WHILE"            -> "DO_WHILE_%04X_START"
+; "WHILE_DO_ENDWHILE"   -> "WHILE_DO_ENDWHILE_%04X_START"  
+; "SWITCH"              ->  No corresponding start label  
+;
+; Stack names:
+;
+; ___loopType               Stack names
+;
+; "FOR"                 -> "FOR_STATEMENT_STACK"
+; "DO_WHILE"            -> "DO_WHILE_STATEMENT_STACK"
+; "WHILE_DO_ENDWHILE"   -> "WHILE_DO_ENDWHILE_STATEMENT_STACK"
+; "SWITCH"              -> "SWITCH_STATEMENT_STACK"
 
 ; --------------------------------------------------------------------------------------------
 
@@ -107,10 +127,6 @@
     LONG_JUMP_ACTIVE                    .set 0  ; flag: use JMP to branch
     LONG_JUMP_WARNINGS                  .set 1  ; flag: output warnings if long jump not needed
     INTERNAL_CALL                       .set 0  ; flag: if on, 'if' macro being invoked from this file.
-    BREAK_COUNT_DOWHILE                 .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_WHILEDO                 .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_FOR                     .set 0  ; break statement counter - incremented after break label created
-    BREAK_COUNT_SWITCH                  .set 0  ; break statement counter - incremented after break label created
     LOOP_TYPE_DEFINED                   .set 0  ; flag: only undefine ___loopType if set
     PRINT_LABELS                        .set 0  ; send macro generated labels to console
 .endscope
@@ -1520,6 +1536,7 @@
     .local useLongJump                  ;  flag: set true if option for 'long', branch is a backward branch, or if FLOW_CONTROL_VALUES::LONG_JUMP_ACTIVE is set
     .local chainedFlag                  ;  flag: branch to next enclosing ENDIF for ELSE and ELSEIF structures
     .local longJumpNotNeeded            ;  flag: true if long jump is not needed for this branch. False means long branch needed or unknown if needed for forward branch
+    .local stackCounter
 
     negateBracketSet        .set FLOW_CONTROL_VALUES::NEGATE_CONDITION ; when set this will negate the entire condition
     negateNext              .set 0
@@ -1618,11 +1635,18 @@
         .elseif .xmatch( .mid(conditionTokenCount, 1, {condition}), break )
             gotoBreakLabel .set 1
              ___verifyBreak_Continue
-            ; peek at stack:
-            ___popLoopType
-            ___pushLoopType ___loopType 
-            .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", ___loopType))
-            .define destinationLabel .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
+            ___peekLoopType
+            stackPeek .sprintf("%s_STATEMENT_STACK", ___loopType), stackCounter
+            .define destinationLabel .ident(.sprintf( "%s_BREAK_%04X", ___loopType, stackCounter))
+        .elseif .xmatch( .mid(conditionTokenCount, 1, {condition}), continue )
+            ___verifyBreak_Continue cont
+            ___peekLoopType
+            stackPeek .sprintf("%s_STATEMENT_STACK", ___loopType), stackCounter
+            .if .xmatch ( .ident(___loopType), FOR)
+                .define destinationLabel .ident(.sprintf( "FOR_%04X_CONTINUE", stackCounter))
+            .else
+                .define destinationLabel .ident(.sprintf("%s_%04X_START", ___loopType, stackCounter))
+            .endif
         .else
             .if FLOW_CONTROL_VALUES::INTERNAL_CALL
                 ___error "Error in expression."
@@ -1880,10 +1904,7 @@
         ___emitLabel .string(exitBranchEvaluation)
     .endif
 
-    .if gotoBreakLabel
-        stackPush .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType), FLOW_CONTROL_VALUES::___breakStatementCounter
-        .undefine ___breakStatementCounter
-    .elseif !gotoUserLabel
+    .if !gotoUserLabel
         stackPush "IF_STATEMENT_STACK", FLOW_CONTROL_VALUES::IF_STATEMENT_COUNT
     .endif
     
@@ -2138,10 +2159,10 @@
 ; Parameters: none
 
 .macro do
-    stackPush "DO_WHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
-    ___emitLabel .sprintf( "DO_WHILE_LOOP_%04X_START", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)
+    stackPush "DO_WHILE_STATEMENT_STACK", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT
+    ___emitLabel .sprintf( "DO_WHILE_%04X_START", FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT)
     FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::DO_WHILE_STATEMENT_COUNT + 1
-    ___pushLoopType "DOWHILE"
+    ___pushLoopType "DO_WHILE"
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2161,16 +2182,16 @@
         while_do {.mid(0, .tcount({condition}) - 1, {condition}) }
     .else
         .local DO_WHILE_STATEMENT_COUNT
-        stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+        stackPop "DO_WHILE_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
         ; check if all okay
         .if DO_WHILE_STATEMENT_COUNT < 0 
             ___error "'while' without 'do'"
         .endif
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-        if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_%04X_START", DO_WHILE_STATEMENT_COUNT)) }, branchtype
+        if { condition goto .ident( .sprintf( "DO_WHILE_%04X_START", DO_WHILE_STATEMENT_COUNT)) }, branchtype
         FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
         ___popLoopType
-        ___generateBreakLabel
+        ___generateBreakLabel DO_WHILE_STATEMENT_COUNT
     .endif
 .endmacro
 
@@ -2199,18 +2220,18 @@
 
 .macro until condition, branchtype
     .local DO_WHILE_STATEMENT_COUNT
-    stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+    stackPop "DO_WHILE_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
     ; check if all okay
     .if DO_WHILE_STATEMENT_COUNT < 0 
         ___error "'until' without 'repeat'"
     .endif
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { condition goto .ident( .sprintf( "DO_WHILE_LOOP_%04X_START", DO_WHILE_STATEMENT_COUNT)) }, branchtype
+    if { condition goto .ident( .sprintf( "DO_WHILE_%04X_START", DO_WHILE_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     ___popLoopType
-    ___generateBreakLabel
+    ___generateBreakLabel DO_WHILE_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2225,14 +2246,14 @@
 
 .macro forever branchtype
     .local DO_WHILE_STATEMENT_COUNT
-    stackPop "DO_WHILE_LOOP_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
+    stackPop "DO_WHILE_STATEMENT_STACK", DO_WHILE_STATEMENT_COUNT
     ; check if all okay
     .if DO_WHILE_STATEMENT_COUNT < 0 
         ___error "Missing 'repeat' or 'do'"
     .endif
-    jmp .ident( .sprintf( "DO_WHILE_LOOP_%04X_START", DO_WHILE_STATEMENT_COUNT))
+    jmp .ident( .sprintf( "DO_WHILE_%04X_START", DO_WHILE_STATEMENT_COUNT))
     ___popLoopType
-    ___generateBreakLabel
+    ___generateBreakLabel DO_WHILE_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2249,12 +2270,12 @@
 ;   <do>, <while>, <repeat>, <until>
 
 .macro while_do condition, branchtype
-    ___pushLoopType "WHILEDO"
-    stackPush "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
-    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_START", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)
+    ___pushLoopType "WHILE_DO_ENDWHILE"
+    stackPush "WHILE_DO_ENDWHILE_STATEMENT_STACK", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT                      ; save counter
+    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_%04X_START", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT)
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 1
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_EXIT", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}, branchtype
+    if {condition goto .ident( .sprintf( "WHILE_DO_ENDWHILE_%04X_EXIT", FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT))}, branchtype
     FLOW_CONTROL_VALUES::NEGATE_CONDITION .set 0
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::WHILE_DO_ENDWHILE_STATEMENT_COUNT + 1      ; increment while-do counter
@@ -2277,21 +2298,21 @@
 
 .macro endwhile knownFlagStatus
     .local WHILE_DO_ENDWHILE_STATEMENT_COUNT
-    stackPop "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", WHILE_DO_ENDWHILE_STATEMENT_COUNT                                        ; get the counter
-    .if WHILE_DO_ENDWHILE_STATEMENT_COUNT < 0                                                                                   ; error check
+    stackPop "WHILE_DO_ENDWHILE_STATEMENT_STACK", WHILE_DO_ENDWHILE_STATEMENT_COUNT
+    .if WHILE_DO_ENDWHILE_STATEMENT_COUNT < 0
         ___error "'endwhile' without 'while-do'"
     .endif
      ; branch or JMP to start of loop
     .ifnblank knownFlagStatus
         setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_START", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+        ___Branch branchFlag, branchCondition, .ident( .sprintf( "WHILE_DO_ENDWHILE_%04X_START", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
         ___clearBranchSet
     .else
-        jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_START", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
+        jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_%04X_START", WHILE_DO_ENDWHILE_STATEMENT_COUNT))
     .endif
-    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_EXIT", WHILE_DO_ENDWHILE_STATEMENT_COUNT)
+    ___emitLabel .sprintf( "WHILE_DO_ENDWHILE_%04X_EXIT", WHILE_DO_ENDWHILE_STATEMENT_COUNT)
     ___popLoopType
-    ___generateBreakLabel
+    ___generateBreakLabel WHILE_DO_ENDWHILE_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
@@ -2301,8 +2322,8 @@
 ;
 ; Parameters: Type of loop that was started
 ; Valid types:
-;   DOWHILE
-;   WHILEDO
+;   DO_WHILE
+;   WHILE_DO_ENDWHILE
 ;   FOR
 ;   SWITCH 
 
@@ -2321,7 +2342,22 @@
     .if FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED
         .undefine ___loopType
     .endif
-    .define ___loopType poppedTokenList
+    .define ___loopType () poppedTokenList
+    FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED .set 1
+.endmacro
+
+; --------------------------------------------------------------------------------------------
+; Function: ___peekLoopType
+;
+; Retrieve the current loop type without changing the stack
+;
+
+.macro ___peekLoopType 
+    peekTokenList "LOOP_TYPE"
+    .if FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED
+        .undefine ___loopType
+    .endif
+    .define ___loopType () poppedTokenList
     FLOW_CONTROL_VALUES::LOOP_TYPE_DEFINED .set 1
 .endmacro
     
@@ -2335,22 +2371,19 @@
 ;
 ; If continue is non-blank, the macro will skip checking if the code is in a switch statement.
 
-.macro ___verifyBreak_Continue continue
-    .local doWhileLoop
-    .local whileDoLoop
-    .local forLoop
-    .local switchCount
-    stackPeek "DO_WHILE_LOOP_STATEMENT_STACK", doWhileLoop
-    stackPeek "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", whileDoLoop
-    stackPeek "FOR_STATEMENT_STACK", forLoop
+.macro ___verifyBreak_Continue cont
     
-    .ifnblank continue
-        .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0
+    ___peekLoopType
+    .ifnblank cont
+        ; if no structure, or most inner structure is a switch    
+        .if .xmatch(___loopType, null)
+            ___error "Invalid 'continue'."
+        .elseif .xmatch ( .ident(___loopType), SWITCH )
             ___error "Invalid 'continue'."
         .endif
     .else
-        stackPeek "SWITCH_TABLE_STATEMENT_STACK", switchCount
-        .if doWhileLoop < 0 && whileDoLoop < 0 && forLoop < 0 && switchCount < 0
+        ; If not in a structure
+        .if .xmatch(___loopType, null)
             ___error "Invalid 'break'."
         .endif
     .endif
@@ -2367,47 +2400,38 @@
 ;                     always, using the syntax for <setBranch>
 
 .macro break knownFlagStatus
-    ___verifyBreak_Continue
-    ; peek at stack:
-    ___popLoopType
-    ___pushLoopType ___loopType
-    .define ___breakStatementCounter() .ident(.sprintf("BREAK_COUNT_%s", ___loopType))
+
+    ; this will check for a valid inner loop
+    ___verifyBreak_Continue 
+    ; peek at stack: (____verifyBreak_Continue above will set ___loopType )
+    ;___peekLoopType ___loopType
+    
+    .local stackCounter
+    stackPeek .sprintf("%s_STATEMENT_STACK", ___loopType), stackCounter
+
     .ifnblank knownFlagStatus
         setBranch knownFlagStatus
-        ___Branch branchFlag, branchCondition, .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
+        ___Branch branchFlag, branchCondition, .ident(.sprintf( "%s_BREAK_%04X", ___loopType, stackCounter))
         ___clearBranchSet
     .else
-        jmp .ident( .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, FLOW_CONTROL_VALUES::___breakStatementCounter))
+        jmp .ident(.sprintf( "%s_BREAK_%04X", ___loopType, stackCounter))
     .endif
-    stackPush .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType), FLOW_CONTROL_VALUES::___breakStatementCounter
-    .undefine ___breakStatementCounter
+
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
-; Function: ___generateBreakLabel checkMoreBreakStatements
+; Function: ___generateBreakLabel count
 ;
 ; Invoked at the end of a loop macro to check if any labels
 ; need to be created for a break command from inside that loop.
 ; Loop type should be popped into __loopType with ___popLoopType before this is called.
 ;
 ; Parameters:
-;   checkMoreBreakStatements - used in recursion to pop any duplicate break values 
-;                              from the stack. (Created when more than one break
-;                              statement is used in a loop.)
+;   count - stack count for label
 
-.macro ___generateBreakLabel checkMoreBreakStatements
-    .local _BREAK_STATEMENT_COUNT
-    stackPeek .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT  
-    .ifnblank checkMoreBreakStatements  ; recursive call to pop stack of any matching break statements
-        .if _BREAK_STATEMENT_COUNT = checkMoreBreakStatements
-            stackPop .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT
-            ___generateBreakLabel _BREAK_STATEMENT_COUNT
-        .endif
-    .elseif _BREAK_STATEMENT_COUNT >= 0
-        stackPop .sprintf("BREAK_STATEMENT_STACK_%s", ___loopType) , _BREAK_STATEMENT_COUNT
-        ___emitLabel .sprintf( "BREAK_STATEMENT_%s_LABEL_%04X", ___loopType, _BREAK_STATEMENT_COUNT)
-        ___generateBreakLabel _BREAK_STATEMENT_COUNT
-        FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) .set FLOW_CONTROL_VALUES::.ident(.sprintf("BREAK_COUNT_%s", ___loopType)) + 1
+.macro ___generateBreakLabel count
+    .ifref .ident(.sprintf( "%s_BREAK_%04X",___loopType, count))
+        ___emitLabel .sprintf( "%s_BREAK_%04X",___loopType, count)
     .endif
 .endmacro
 
@@ -2416,26 +2440,33 @@
 ;
 ; Branch or jump to the start of the current loop
 
-.macro continue
-    ___verifyBreak_Continue continue
-    
-    .local STRUCTURE_COUNT
-    ; peek:
-    ___popLoopType
-    ___pushLoopType ___loopType
-    
-    .define identLoopType .ident(___loopType)
-    .if .xmatch(identLoopType, FOR)
-        stackPeek "FOR_STATEMENT_STACK", STRUCTURE_COUNT
-        jmp .ident( .sprintf( "FOR_STATEMENT_%04X_START", STRUCTURE_COUNT))
-    .elseif .xmatch(identLoopType, DOWHILE)
-        stackPeek "DO_WHILE_LOOP_STATEMENT_STACK", STRUCTURE_COUNT
-        jmp .ident( .sprintf( "DO_WHILE_LOOP_%04X_START", STRUCTURE_COUNT))
-    .elseif .xmatch(identLoopType, WHILEDO)
-        stackPeek "WHILE_DO_ENDWHILE_LOOP_STATEMENT_STACK", STRUCTURE_COUNT
-        jmp .ident( .sprintf( "WHILE_DO_ENDWHILE_LOOP_%04X_START", STRUCTURE_COUNT))
+.macro continue knownFlagStatus
+
+    ; this will check for a valid inner loop, will not allow switch to use continue:
+    ___verifyBreak_Continue cont
+    ; peek at stack: (____verifyBreak_Continue above will set ___loopType )
+    ;___peekLoopType ___loopType
+
+    .local stackCounter
+    stackPeek .sprintf("%s_STATEMENT_STACK", ___loopType), stackCounter
+
+    ; if FOR loop, continue will branch to the end of the loop ..
+    ; .. to do the increment and condition
+    .if .xmatch ( .ident(___loopType), FOR)
+        .define continueLabel .ident(.sprintf( "FOR_%04X_CONTINUE", stackCounter))
+    .else
+        .define continueLabel .ident(.sprintf("%s_%04X_START", ___loopType, stackCounter))
     .endif
-    .undefine identLoopType
+
+    .ifnblank knownFlagStatus
+        setBranch knownFlagStatus
+        ___Branch branchFlag, branchCondition, continueLabel
+        ___clearBranchSet
+    .else
+        jmp continueLabel
+    .endif
+
+    .undefine continueLabel
 .endmacro
 
 
@@ -2452,7 +2483,7 @@
 ;   and are both optional. The <condition> can be anything that follows conditional expression 
 ;   syntax for IF.
 ;
-;   Code for <init> will always be executed. If any value is passed for <strict> the 
+;   Code for <init> will always be executed. If 'strict' is passed for <strict> the 
 ;   loop will only be executed after <condition> is checked. If <strict> is not used,
 ;   the loop will always be executed at least once. If it is clear the loop will be 
 ;   executed at least once, do not use strict - it avoids the generation of a JMP command.
@@ -2486,11 +2517,11 @@
             ___error "Expected: 'strict': Test condition before first loop is executed."
         .endif
         stackPush "FOR_STATEMENT_STRICT", 1
-        jmp .ident( .sprintf( "FOR_STATEMENT_%04X_JMP_TO_CONDITION", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT))
+        jmp .ident( .sprintf( "FOR_%04X_JMP_TO_CONDITION", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT))
     .else
         stackPush "FOR_STATEMENT_STRICT", 0
     .endif
-    ___emitLabel .sprintf( "FOR_STATEMENT_%04X_START", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT)
+    ___emitLabel .sprintf( "FOR_%04X_START", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT)
     
     stackPush "FOR_STATEMENT_STACK", FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT
     FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::FOR_STATEMENT_COUNT + 1
@@ -2513,25 +2544,32 @@
 .macro next branchtype
     .local FOR_STATEMENT_COUNT
     .local FOR_STATEMENT_STRICT_STATUS
+    .local FOR_STATEMENT_USED_CONTINUE
     
     stackPop "FOR_STATEMENT_STACK", FOR_STATEMENT_COUNT
-    stackPop "FOR_STATEMENT_STRICT", FOR_STATEMENT_STRICT_STATUS
     .if FOR_STATEMENT_COUNT < 0
         ___error "'next' without 'for'."
     .endif
-    ; if FOR_STATEMENT_STACK is valid, then popTokenList should be too:
+    
+    ; branch here if there was a 'continue' command
+    .ifref .ident(.sprintf( "FOR_%04X_CONTINUE", FOR_STATEMENT_COUNT))
+        ___emitLabel .sprintf( "FOR_%04X_CONTINUE", FOR_STATEMENT_COUNT)
+    .endif
+    ; code to execute before next loop:
     popTokenList "FOR_STATEMENT_INCREMENT"
     ___evaluateStatementList {poppedTokenList}
+
+    stackPop "FOR_STATEMENT_STRICT", FOR_STATEMENT_STRICT_STATUS
     .if FOR_STATEMENT_STRICT_STATUS
         ; jmp here on strict:
-        ___emitLabel .sprintf( "FOR_STATEMENT_%04X_JMP_TO_CONDITION", FOR_STATEMENT_COUNT)
+        ___emitLabel .sprintf( "FOR_%04X_JMP_TO_CONDITION", FOR_STATEMENT_COUNT)
     .endif
     popTokenList "FOR_STATEMENT_CONDITION"
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 1
-    if { poppedTokenList goto .ident( .sprintf( "FOR_STATEMENT_%04X_START", FOR_STATEMENT_COUNT)) }, branchtype
+    if { poppedTokenList goto .ident( .sprintf( "FOR_%04X_START", FOR_STATEMENT_COUNT)) }, branchtype
     FLOW_CONTROL_VALUES::INTERNAL_CALL .set 0
     ___popLoopType
-    ___generateBreakLabel
+    ___generateBreakLabel FOR_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------; --------------------------------------------------------------------------------------------
@@ -2630,7 +2668,7 @@
     rts
    
     .ident( .sprintf( "SWITCH_TABLE_STATEMENT_%04X_GOTO_MODE", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNT)) = gotoMode
-    stackPush "SWITCH_TABLE_STATEMENT_STACK", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNT
+    stackPush "SWITCH_STATEMENT_STACK", FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNT
     FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNT .set FLOW_CONTROL_VALUES::SWITCH_STATEMENT_COUNT + 1
     .undefine INDEX_REG_FOR_TABLE
     .undefine SWITCH_INFO_REG
@@ -2649,7 +2687,7 @@
 
     ; get case statement number from the stack:
     .local SWITCH_STATEMENT_COUNT
-    stackPeek "SWITCH_TABLE_STATEMENT_STACK", SWITCH_STATEMENT_COUNT
+    stackPeek "SWITCH_STATEMENT_STACK", SWITCH_STATEMENT_COUNT
     .if SWITCH_STATEMENT_COUNT < 0
         ___error "'case' without 'switch'."
     .endif
@@ -2721,7 +2759,7 @@
 .macro endswitch
     .local SWITCH_STATEMENT_COUNT
     .local exit
-    stackPop "SWITCH_TABLE_STATEMENT_STACK", SWITCH_STATEMENT_COUNT
+    stackPop "SWITCH_STATEMENT_STACK", SWITCH_STATEMENT_COUNT
     .if SWITCH_STATEMENT_COUNT < 0
         ___error "'endswitch' without 'switch'."
     .endif
@@ -2785,7 +2823,7 @@
         ___emitLabel .sprintf( "SWITCH_TABLE_STATEMENT_%04X_DEFAULT", SWITCH_STATEMENT_COUNT)
     .endif
     ___popLoopType
-    ___generateBreakLabel
+    ___generateBreakLabel SWITCH_STATEMENT_COUNT
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
