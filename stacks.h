@@ -108,24 +108,26 @@ _STACKS_ = 1
 ; tokenList - any number of tokens that could be valid in ca65 (doesn't have to be valid code)
 ; After a pop, access the token list with poppedTokenList
 
-.macro pushTokenList stackname, tokenList
-    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
-    ; if not defined, create it:
-    .ifndef thisStackPointer
-        thisStackPointer .set 0
-    .endif
-    .define .ident( .sprintf("%s_%04X_",stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname)) )) () tokenList
-    thisStackPointer .set thisStackPointer  + 1
-    .undefine thisStackPointer
-.endmacro
-
-; ca65 copies the token list on macro call, so use this macro to get a copy and be able to undefine the stack element
+; --------------------------------------------------------------------------------------------
+; ca65 copies the token list on macro call, so use this macro to get a copy
+; then we can undefine the stack element
 .macro tokenListPopHelper tokenlist
     .define poppedTokenList() tokenlist
 .endmacro
 
+.macro pushTokenList stackname, tokenList
+    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER", stackname))
+    ; if not defined, create it:
+    .ifndef thisStackPointer
+        thisStackPointer .set 0
+    .endif
+    .define .ident( .sprintf("%s_%04X_",stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER", stackname)) )) () tokenList
+    thisStackPointer .set thisStackPointer  + 1
+    .undefine thisStackPointer
+.endmacro
+
 .macro popTokenList stackname
-    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
+    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER", stackname))
     .if stacksValues::poppedTokenListActive
         .undefine poppedTokenList
     .endif
@@ -134,14 +136,14 @@ _STACKS_ = 1
     .else
         thisStackPointer .set thisStackPointer - 1
         tokenListPopHelper { .ident( .sprintf("%s_%04X_", stackname, thisStackPointer) ) }
-        .undefine .ident( .sprintf("%s_%04X_", stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname)) ))
+        .undefine .ident( .sprintf("%s_%04X_", stackname, ::.ident(.sprintf("___%s_TL_STACKPOINTER", stackname)) ))
     .endif
     stacksValues::poppedTokenListActive .set 1
     .undefine thisStackPointer
 .endmacro
 
 .macro peekTokenList stackname
-    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER__", stackname))
+    .define thisStackPointer ::.ident(.sprintf("___%s_TL_STACKPOINTER", stackname))
     .if stacksValues::poppedTokenListActive
         .undefine poppedTokenList
     .endif

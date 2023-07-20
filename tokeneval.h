@@ -18,7 +18,7 @@
 
 ; Token evaluation
 ; --------------------------------------------------------------------------------------------
-; macros to aid with parsing long token strings
+; macros to aid with parsing long token lists
 
 .ifndef _TOKENEVAL_
 _TOKENEVAL_ = 1
@@ -56,13 +56,20 @@ _TOKENEVAL_ = 1
     .define EOT () ( tokenListEval::tokenOffset + 1 > tokenListEval::tokenCount )
     .define currentTokenNumber tokenListEval::tokenOffset
     .define allowedTokens
+    .define tokenErrorMessage ""
 .endmacro
 
 ; --------------------------------------------------------------------------------------------
 ; pass a list of tokens that must have a match 
 ; when nextToken is next called
 
-.macro verifyNextToken tokenList
+.macro verifyNextToken tokenList, message
+    .undefine tokenErrorMessage
+    .ifblank message
+        .define tokenErrorMessage ""
+    .else
+        .define tokenErrorMessage () message
+    .endif
     .undefine allowedTokens
     .define allowedTokens () tokenList
     tokenListEval::verifyTokenOn .set 1
@@ -89,14 +96,14 @@ _TOKENEVAL_ = 1
         tokenListEval::tokenOffset .set tokenListEval::tokenOffset + 1
         .if (!EOT) && tokenListEval::verifyTokenOn
             matchFound .set 0
-            .repeat .tcount( {allowedTokens} ), i
-                .if .match(  {currentToken}, { .mid( i,1,{allowedTokens} ) } )
+            .repeat .tcount( {allowedTokens} ), ___i
+                .if .match(  {currentToken}, { .mid( ___i, 1, {allowedTokens} ) } )
                     matchFound .set 1
                 .endif
             .endrepeat
             .if !matchFound
                 ; it would be nice to output the offending token, but .string() doesn't work with all tokens
-                .error "Error in expression."
+                .error .sprintf("Error in expression. %s", tokenErrorMessage)
                 .fatal "STOP"
             .endif
         .endif
@@ -113,6 +120,7 @@ _TOKENEVAL_ = 1
 ; --------------------------------------------------------------------------------------------
 ; save/restore position
 ; can save/restore  one position. (Could add support for multiple via stack if needed.)
+
 .macro saveTokenListPosition
     tokenListEval::savedTokenOffset .set tokenListEval::tokenOffset
 .endmacro
@@ -136,6 +144,7 @@ _TOKENEVAL_ = 1
         .undefine EOT
         .undefine currentTokenNumber
         .undefine allowedTokens
+        .undefine tokenErrorMessage
         tokenListEval::active .set 0
     .endif
 .endmacro

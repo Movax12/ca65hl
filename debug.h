@@ -86,7 +86,7 @@
         .exitmacro
     .endif
 
-    .if PRINTIDENT::_COUNTER_ >= .tcount({exp})
+     .if PRINTIDENT::_COUNTER_ >= .tcount({exp})
         .if PRINTIDENT::__concatStrDefined__ 
             .out _tokentStr_
         .endif

@@ -448,7 +448,7 @@ Examples:
 ### Extended Syntax
 
 In the file `ca65hl.h` there is an check for the global identifier
-`__CA65HL_USE_CUSTOM_SYNTAX__` If it is not defined or defined as a non-zero 
+`CA65HL_USE_CUSTOM_SYNTAX` If it is not defined or defined as a non-zero 
 value, `customSyntax.h` will be included in the source. This file enables
 an optional syntax for 6502 assembly that allows offsets and indexed instructions 
 to be written like arrays. This makes it easier to allow assembly instructions in 
@@ -719,7 +719,7 @@ statement. Example:
     endif
     
 The macro code will verify that this option is used correctly with 
-an `.assert`. (Can only be checked at link time.) If `__CA65HL_WARNING_LEVEL__` 
+an `.assert`. (Can only be checked at link time.) If `CA65HL_WARNING_LEVEL` 
 is non-zero the macro code will suggest to use this feature where possible.
 
 #### Optimizing tail call JMP before an `else` or `elseif` - jmp
@@ -739,16 +739,16 @@ Example:
 
 If `_CUSTOM_SYNTAX_` is non-zero, the macro code will verify that this option is 
 used correctly with an `.assert`. (Can only be checked at link time.)
-If `_CUSTOM_SYNTAX_` is non-zero, and `__CA65HL_WARNING_LEVEL__` is non-zero 
+If `_CUSTOM_SYNTAX_` is non-zero, and `CA65HL_WARNING_LEVEL` is non-zero 
 the macro code will suggest to use this feature where possible.
 If `_CUSTOM_SYNTAX_` is zero, this option can be used, but the macro code 
-will not be able to verify its coorect use.
+will not be able to verify its correct use.
 
 ## Warnings
 
 The macros in this package attempt to give helpful error messages and warnings 
 about how to use them. 
-The identifier `__CA65HL_WARNING_LEVEL__` can be set from 0 to 2 to output
+The identifier `CA65HL_WARNING_LEVEL` can be set from 0 to 2 to output
 warnings about some changes to registers, or optimizations that could be 
 applied that ca65 cannot determine on its own at assemble time 
 ( due to the one-pass assembly design ). Important errors or warnings will 
@@ -757,7 +757,7 @@ not be suppressed.
 ## Troubleshooting
 
 Although ca65hl has been tested, there may be bugs! To see some info on what the macros are doing, 
-set `__DEBUG_CA65HL__` to a non-zero value. The macros will print some info to the console on what
+set `CA65HL_DEBUG` to a non-zero value. The macros will print some info to the console on what
 they are doing. This is very limited at this time, but may help isolate problems.
 
 As well, and perhaps more useful, customSyntax and ca65hl macros support printing the 

@@ -294,7 +294,6 @@
             .if .xmatch(.left (1,{statement}), rts )
                 CUSTOM_SYNTAX::RTS_FOUND .set 1
             .endif
-            
             ___arraySyntax .left (1,{statement}), { .mid (1, .tcount({statement}) - 1, {statement} ) }, index
         .else
             statement
